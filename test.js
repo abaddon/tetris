@@ -3,7 +3,7 @@
 // Run: `node test.js` (also invoked by ./verify.sh).
 'use strict';
 
-const { createGame, play, statusText, fromString, resolveName, applyResult } = require('./game.js');
+const { createGame, play, statusText, fromString, resolveName, applyResult, awardWin, topN } = require('./game.js');
 
 let pass = 0;
 let fail = 0;
@@ -166,6 +166,34 @@ function eq(actual, expected, label) {
   const before = { X: 0, O: 0 };
   applyResult(before, 'X');
   eq(before, { X: 0, O: 0 }, 'applyResult: does not mutate input');
+}
+
+// --- awardWin ---
+{
+  const store = {};
+  const s1 = awardWin(store, 'Alice');
+  eq(s1, { Alice: 1 }, 'awardWin: first win creates entry');
+  const s2 = awardWin(s1, 'Alice');
+  eq(s2, { Alice: 2 }, 'awardWin: second win accumulates');
+  const s3 = awardWin(s1, 'Bob');
+  eq(s3, { Alice: 1, Bob: 1 }, 'awardWin: second player entry added');
+  eq(store, {}, 'awardWin: does not mutate original store');
+}
+
+// --- topN ---
+{
+  // basic sort descending by points
+  const store = { Alice: 3, Bob: 5, Carol: 1 };
+  eq(topN(store, 3), [{ name: 'Bob', pts: 5 }, { name: 'Alice', pts: 3 }, { name: 'Carol', pts: 1 }], 'topN: sorted desc by points');
+  // top-N limit
+  eq(topN(store, 2), [{ name: 'Bob', pts: 5 }, { name: 'Alice', pts: 3 }], 'topN: capped at N');
+  // tie broken alphabetically
+  const tied = { Carol: 5, Alice: 5 };
+  eq(topN(tied, 2), [{ name: 'Alice', pts: 5 }, { name: 'Carol', pts: 5 }], 'topN: ties broken alphabetically ASC');
+  // top-10 cap
+  const big = {};
+  for (var i = 0; i < 12; i++) big['Player' + i] = i;
+  eq(topN(big, 10).length, 10, 'topN: returns at most 10 entries');
 }
 
 console.log(`\nTris tests: ${pass} passed, ${fail} failed`);

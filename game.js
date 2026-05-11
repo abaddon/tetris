@@ -77,6 +77,24 @@ function applyResult(scores, winner) {
   };
 }
 
+// Increments the named player's entry in a leaderboard store object and returns a new store.
+// store: {[name]: points}. Draws should not call this.
+function awardWin(store, name) {
+  var next = Object.assign({}, store);
+  next[name] = (next[name] || 0) + 1;
+  return next;
+}
+
+// Returns at most n entries from store, sorted by points DESC then name ASC.
+function topN(store, n) {
+  var entries = Object.keys(store).map(function (k) { return { name: k, pts: store[k] }; });
+  entries.sort(function (a, b) {
+    if (b.pts !== a.pts) return b.pts - a.pts;
+    return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+  });
+  return entries.slice(0, n);
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { createGame, play, detectWinner, statusText, fromString, resolveName, applyResult };
+  module.exports = { createGame, play, detectWinner, statusText, fromString, resolveName, applyResult, awardWin, topN };
 }

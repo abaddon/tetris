@@ -108,8 +108,8 @@
       function addLeaderboardWin(name) {
         var data = loadLeaderboard();
         if (data === null) return; // storage unavailable — skip silently
-        data[name] = (data[name] || 0) + 1;
-        saveLeaderboard(data);
+        var updated = awardWin(data, name);
+        saveLeaderboard(updated);
         renderLeaderboard();
       }
 
@@ -120,12 +120,7 @@
           listEl.innerHTML = '<li>Scores unavailable</li>';
           return;
         }
-        var entries = Object.keys(data).map(function (n) { return { name: n, pts: data[n] }; });
-        entries.sort(function (a, b) {
-          if (b.pts !== a.pts) return b.pts - a.pts;
-          return a.name.localeCompare(b.name);
-        });
-        entries = entries.slice(0, 10);
+        var entries = topN(data, 10);
         listEl.innerHTML = entries.map(function (e) {
           return '<li>' + e.name + ': ' + e.pts + '</li>';
         }).join('');
