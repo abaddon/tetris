@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tris</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    gap: 1rem; padding: 2rem; margin: 0;
+  }
+  h1 { margin: 0; font-size: 1.5rem; }
+  #status { font-size: 1.1rem; min-height: 1.4em; }
+  #board {
+    display: grid;
+    grid-template-columns: repeat(3, 5rem);
+    grid-template-rows: repeat(3, 5rem);
+    gap: 4px;
+    background: #888;
+    padding: 4px;
+    border-radius: 6px;
+  }
+  .cell {
+    background: #fff; color: #111;
+    font-size: 2.5rem; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; user-select: none;
+    border: none; padding: 0;
+  }
+  .cell:disabled { cursor: not-allowed; opacity: 0.85; }
+  @media (prefers-color-scheme: dark) {
+    .cell { background: #1c1c1e; color: #f5f5f7; }
+  }
+  #reset {
+    padding: 0.5rem 1rem; font-size: 1rem; cursor: pointer;
+    border-radius: 4px; border: 1px solid #888; background: transparent;
+    color: inherit;
+  }
+</style>
+</head>
+<body>
+  <h1>Tris</h1>
+  <div id="status" aria-live="polite">Turn: X</div>
+  <div id="board" role="grid" aria-label="Tic-tac-toe board"></div>
+  <button id="reset" type="button">Reset</button>
+
+  <script src="game.js"></script>
+  <script>
+    (function () {
+      var state = createGame();
+      var boardEl = document.getElementById('board');
+      var statusEl = document.getElementById('status');
+      var resetEl = document.getElementById('reset');
+      var cells = [];
+
+      function render() {
+        for (var i = 0; i < 9; i++) {
+          var v = state.board[i];
+          cells[i].textContent = v === null ? '' : v;
+          cells[i].disabled = v !== null || state.winner !== null || state.draw;
+        }
+        statusEl.textContent = statusText(state);
+      }
+
+      function onClick(i) {
+        return function () {
+          var next = play(state, i);
+          if (next === state) return;
+          state = next;
+          render();
+        };
+      }
+
+      for (var i = 0; i < 9; i++) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'cell';
+        btn.setAttribute('role', 'gridcell');
+        btn.setAttribute('aria-label', 'cell ' + i);
+        btn.dataset.cell = String(i);
+        btn.addEventListener('click', onClick(i));
+        boardEl.appendChild(btn);
+        cells.push(btn);
+      }
+
+      resetEl.addEventListener('click', function () {
+        state = createGame();
+        render();
+      });
+
+      render();
+    })();
+  </script>
+</body>
+</html>
