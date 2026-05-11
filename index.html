@@ -33,27 +33,137 @@
   @media (prefers-color-scheme: dark) {
     .cell { background: #1c1c1e; color: #f5f5f7; }
   }
-  #reset {
+  #reset, #new-session {
     padding: 0.5rem 1rem; font-size: 1rem; cursor: pointer;
     border-radius: 4px; border: 1px solid #888; background: transparent;
     color: inherit;
   }
+  #name-setup {
+    display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap; justify-content: center;
+  }
+  .name-field { display: flex; flex-direction: column; gap: 0.25rem; }
+  .name-field label { font-size: 0.85rem; }
+  .name-field input {
+    padding: 0.3rem 0.5rem; font-size: 1rem; border-radius: 4px;
+    border: 1px solid #888; background: transparent; color: inherit; width: 10rem;
+  }
+  #name-labels { display: flex; gap: 2rem; font-size: 1rem; }
+  #score-display { font-size: 1rem; min-height: 1.4em; }
+  #actions { display: flex; gap: 0.5rem; }
 </style>
 </head>
 <body>
   <h1>Tris</h1>
+  <div id="name-setup">
+    <div class="name-field">
+      <label for="name-x">Player X name</label>
+      <input id="name-x" type="text" maxlength="20" placeholder="Player X" aria-label="Name for X" />
+    </div>
+    <div class="name-field">
+      <label for="name-o">Player O name</label>
+      <input id="name-o" type="text" maxlength="20" placeholder="Player O" aria-label="Name for O" />
+    </div>
+    <button id="start" type="button">Start</button>
+  </div>
+  <div id="name-labels">
+    <span id="label-x">Player X</span>
+    <span id="label-o">Player O</span>
+  </div>
+  <div id="score-display"></div>
   <div id="status" aria-live="polite">Turn: X</div>
   <div id="board" role="grid" aria-label="Tic-tac-toe board"></div>
-  <button id="reset" type="button">Reset</button>
+  <div id="actions">
+    <button id="reset" type="button">Reset</button>
+    <button id="new-session" type="button">New Session</button>
+  </div>
+  <div id="leaderboard-panel">
+    <h2>Leaderboard</h2>
+    <ol id="leaderboard-list"></ol>
+  </div>
 
   <script src="game.js"></script>
   <script>
     (function () {
+      // --- leaderboard (localStorage) ---
+      var LEADERBOARD_KEY = 'tris_leaderboard';
+
+      function loadLeaderboard() {
+        try {
+          var raw = localStorage.getItem(LEADERBOARD_KEY);
+          return raw ? JSON.parse(raw) : {};
+        } catch (e) {
+          return null; // unavailable
+        }
+      }
+
+      function saveLeaderboard(data) {
+        try {
+          localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(data));
+          return true;
+        } catch (e) {
+          return false;
+        }
+      }
+
+      function addLeaderboardWin(name) {
+        var data = loadLeaderboard();
+        if (data === null) return; // storage unavailable — skip silently
+        data[name] = (data[name] || 0) + 1;
+        saveLeaderboard(data);
+        renderLeaderboard();
+      }
+
+      function renderLeaderboard() {
+        var listEl = document.getElementById('leaderboard-list');
+        var data = loadLeaderboard();
+        if (data === null) {
+          listEl.innerHTML = '<li>Scores unavailable</li>';
+          return;
+        }
+        var entries = Object.keys(data).map(function (n) { return { name: n, pts: data[n] }; });
+        entries.sort(function (a, b) {
+          if (b.pts !== a.pts) return b.pts - a.pts;
+          return a.name.localeCompare(b.name);
+        });
+        entries = entries.slice(0, 10);
+        listEl.innerHTML = entries.map(function (e) {
+          return '<li>' + e.name + ': ' + e.pts + '</li>';
+        }).join('');
+      }
+
+      // --- session state ---
+      var names = { X: 'Player X', O: 'Player O' };
+      var scores = { X: 0, O: 0 };
       var state = createGame();
+      var sessionStarted = false;
+
       var boardEl = document.getElementById('board');
       var statusEl = document.getElementById('status');
       var resetEl = document.getElementById('reset');
+      var newSessionEl = document.getElementById('new-session');
+      var startEl = document.getElementById('start');
+      var nameXEl = document.getElementById('name-x');
+      var nameOEl = document.getElementById('name-o');
+      var labelXEl = document.getElementById('label-x');
+      var labelOEl = document.getElementById('label-o');
+      var scoreDisplayEl = document.getElementById('score-display');
       var cells = [];
+
+      function nameFor(side) { return names[side]; }
+
+      function renderStatus() {
+        if (state.winner) {
+          statusEl.textContent = nameFor(state.winner) + ' wins!';
+        } else if (state.draw) {
+          statusEl.textContent = 'Draw';
+        } else {
+          statusEl.textContent = nameFor(state.turn) + "'s turn";
+        }
+      }
+
+      function renderScore() {
+        scoreDisplayEl.textContent = names.X + ' ' + scores.X + ' – ' + names.O + ' ' + scores.O;
+      }
 
       function render() {
         for (var i = 0; i < 9; i++) {
@@ -61,14 +171,20 @@
           cells[i].textContent = v === null ? '' : v;
           cells[i].disabled = v !== null || state.winner !== null || state.draw;
         }
-        statusEl.textContent = statusText(state);
+        renderStatus();
+        renderScore();
       }
 
       function onClick(i) {
         return function () {
+          if (!sessionStarted) return;
           var next = play(state, i);
           if (next === state) return;
           state = next;
+          if (state.winner) {
+            scores[state.winner] += 1;
+            addLeaderboardWin(nameFor(state.winner));
+          }
           render();
         };
       }
@@ -85,11 +201,35 @@
         cells.push(btn);
       }
 
+      startEl.addEventListener('click', function () {
+        names.X = resolveName(nameXEl.value, 'X');
+        names.O = resolveName(nameOEl.value, 'O');
+        labelXEl.textContent = names.X;
+        labelOEl.textContent = names.O;
+        scores = { X: 0, O: 0 };
+        state = createGame();
+        sessionStarted = true;
+        render();
+      });
+
       resetEl.addEventListener('click', function () {
         state = createGame();
         render();
       });
 
+      newSessionEl.addEventListener('click', function () {
+        nameXEl.value = '';
+        nameOEl.value = '';
+        names = { X: 'Player X', O: 'Player O' };
+        scores = { X: 0, O: 0 };
+        labelXEl.textContent = names.X;
+        labelOEl.textContent = names.O;
+        state = createGame();
+        sessionStarted = false;
+        render();
+      });
+
+      renderLeaderboard();
       render();
     })();
   </script>

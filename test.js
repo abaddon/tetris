@@ -3,7 +3,7 @@
 // Run: `node test.js` (also invoked by ./verify.sh).
 'use strict';
 
-const { createGame, play, statusText, fromString } = require('./game.js');
+const { createGame, play, statusText, fromString, resolveName } = require('./game.js');
 
 let pass = 0;
 let fail = 0;
@@ -141,6 +141,16 @@ function eq(actual, expected, label) {
   const s = createGame();
   eq(play(s, -1), s, 'negative cell ignored');
   eq(play(s, 9), s, 'cell >= 9 ignored');
+}
+
+// --- resolveName ---
+{
+  eq(resolveName('Alice', 'X'), 'Alice', 'resolveName: normal name');
+  eq(resolveName('', 'X'), 'Player X', 'resolveName: blank falls back to default X');
+  eq(resolveName('', 'O'), 'Player O', 'resolveName: blank falls back to default O');
+  eq(resolveName('  Alice  ', 'X'), 'Alice', 'resolveName: trims whitespace');
+  eq(resolveName('   ', 'X'), 'Player X', 'resolveName: whitespace-only falls back');
+  eq(resolveName(null, 'X'), 'Player X', 'resolveName: null falls back');
 }
 
 console.log(`\nTris tests: ${pass} passed, ${fail} failed`);

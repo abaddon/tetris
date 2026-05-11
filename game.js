@@ -63,6 +63,11 @@ function fromString(s, nextTurn) {
   return { board, turn, winner, draw };
 }
 
+function resolveName(raw, side) {
+  var trimmed = (typeof raw === 'string' ? raw : '').trim();
+  return trimmed.length > 0 ? trimmed : ('Player ' + side);
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { createGame, play, detectWinner, statusText, fromString };
+  module.exports = { createGame, play, detectWinner, statusText, fromString, resolveName };
 }
