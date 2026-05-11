@@ -182,7 +182,7 @@
           if (next === state) return;
           state = next;
           if (state.winner) {
-            scores[state.winner] += 1;
+            scores = applyResult(scores, state.winner);
             addLeaderboardWin(nameFor(state.winner));
           }
           render();

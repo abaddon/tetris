@@ -3,7 +3,7 @@
 // Run: `node test.js` (also invoked by ./verify.sh).
 'use strict';
 
-const { createGame, play, statusText, fromString, resolveName } = require('./game.js');
+const { createGame, play, statusText, fromString, resolveName, applyResult } = require('./game.js');
 
 let pass = 0;
 let fail = 0;
@@ -151,6 +151,21 @@ function eq(actual, expected, label) {
   eq(resolveName('  Alice  ', 'X'), 'Alice', 'resolveName: trims whitespace');
   eq(resolveName('   ', 'X'), 'Player X', 'resolveName: whitespace-only falls back');
   eq(resolveName(null, 'X'), 'Player X', 'resolveName: null falls back');
+}
+
+// --- applyResult ---
+{
+  const zero = { X: 0, O: 0 };
+  eq(applyResult(zero, 'X'), { X: 1, O: 0 }, 'applyResult: X wins increments X');
+  eq(applyResult(zero, 'O'), { X: 0, O: 1 }, 'applyResult: O wins increments O');
+  eq(applyResult(zero, null), { X: 0, O: 0 }, 'applyResult: draw leaves scores unchanged');
+  // accumulation
+  const mid = { X: 2, O: 1 };
+  eq(applyResult(mid, 'X'), { X: 3, O: 1 }, 'applyResult: accumulates across matches');
+  // immutability
+  const before = { X: 0, O: 0 };
+  applyResult(before, 'X');
+  eq(before, { X: 0, O: 0 }, 'applyResult: does not mutate input');
 }
 
 console.log(`\nTris tests: ${pass} passed, ${fail} failed`);

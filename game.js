@@ -68,6 +68,15 @@ function resolveName(raw, side) {
   return trimmed.length > 0 ? trimmed : ('Player ' + side);
 }
 
+// Returns new scores object with winner's score incremented; draw leaves scores unchanged.
+function applyResult(scores, winner) {
+  if (!winner) return { X: scores.X, O: scores.O };
+  return {
+    X: scores.X + (winner === 'X' ? 1 : 0),
+    O: scores.O + (winner === 'O' ? 1 : 0),
+  };
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { createGame, play, detectWinner, statusText, fromString, resolveName };
+  module.exports = { createGame, play, detectWinner, statusText, fromString, resolveName, applyResult };
 }
