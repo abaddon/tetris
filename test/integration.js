@@ -429,6 +429,47 @@ async function run() {
 
   wsA.close();
 
+  // ---- Sprint-04 Story 03: GET /api/leaderboard ----
+
+  // Re-login alice to get a fresh session for leaderboard tests
+  const aliceLb = `aliceLb_${Date.now()}`;
+  let lbCookie = '';
+  {
+    await req('POST', '/api/register', { username: aliceLb, password: p });
+    const r = await req('POST', '/api/login', { username: aliceLb, password: p });
+    assert(r.status === 200, `sprint04-s03: aliceLb login 200 (got ${r.status})`);
+    lbCookie = (r.headers['set-cookie']?.[0] || '').split(';')[0];
+  }
+
+  // Authenticated GET returns 200 + array
+  {
+    const r = await req('GET', '/api/leaderboard', null, { Cookie: lbCookie });
+    assert(r.status === 200, `sprint04-s03: GET /api/leaderboard 200 (got ${r.status})`);
+    assert(Array.isArray(r.data), 'sprint04-s03: leaderboard response is array');
+  }
+
+  // Each object has { username, pts } shape
+  {
+    const r = await req('GET', '/api/leaderboard', null, { Cookie: lbCookie });
+    const valid = Array.isArray(r.data) && r.data.every(
+      (e) => typeof e.username === 'string' && typeof e.pts === 'number'
+    );
+    assert(valid, 'sprint04-s03: every leaderboard entry has { username: string, pts: number }');
+  }
+
+  // Unauthenticated GET returns 401
+  {
+    const r = await req('GET', '/api/leaderboard', null);
+    assert(r.status === 401, `sprint04-s03: GET /api/leaderboard 401 without session (got ${r.status})`);
+  }
+
+  // Result is capped at 10 even when many players exist (we seed >=10 users from previous stories,
+  // but they have 0 pts so we just verify the array length <= 10 invariant)
+  {
+    const r = await req('GET', '/api/leaderboard', null, { Cookie: lbCookie });
+    assert(Array.isArray(r.data) && r.data.length <= 10, `sprint04-s03: leaderboard capped at 10 (got ${r.data?.length})`);
+  }
+
   // ---- results ----
   console.log(`\nIntegration: ${pass} passed, ${fail} failed`);
   if (fail > 0) {

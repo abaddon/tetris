@@ -9,6 +9,7 @@ const { Router } = require('./router.js');
 const { readBody, send, parseCookies, setCookieHeader } = require('./http-helpers.js');
 const { ScryptHasher, MemorySessionStore } = require('./auth.js');
 const { JsonlUserStore } = require('./user-store.js');
+const { JsonlScoreStore } = require('./score-store.js');
 const { InMemoryMatchStore } = require('./match-store.js');
 const { MatchHub } = require('./match-hub.js');
 
@@ -21,9 +22,11 @@ fs.copyFileSync(sharedGame, publicGame);
 const dataDir = path.join(__dirname, '../data');
 const userStore = new JsonlUserStore(path.join(dataDir, 'users.jsonl'));
 userStore.boot();
+const scoreStore = new JsonlScoreStore(path.join(dataDir, 'scores.jsonl'));
+scoreStore.boot();
 const sessionStore = new MemorySessionStore();
 const matchStore = new InMemoryMatchStore();
-const matchHub = new MatchHub(matchStore, sessionStore);
+const matchHub = new MatchHub(matchStore, sessionStore, scoreStore);
 
 // ---- static file serving ----
 const PUBLIC_DIR = path.join(__dirname, '../public');
@@ -101,6 +104,14 @@ router.on('GET', '/api/me', (req, res) => {
   send(res, 200, { username });
 });
 
+router.on('GET', '/api/leaderboard', async (req, res) => {
+  const username = getSession(req);
+  if (!username) { send(res, 401, { error: 'Not authenticated' }); return; }
+  const entries = await scoreStore.top(10);
+  // Port returns { name, pts }; public API schema uses { username, pts }
+  send(res, 200, entries.map(({ name, pts }) => ({ username: name, pts })));
+});
+
 router.on('POST', '/api/matches', (req, res) => {
   const username = getSession(req);
   if (!username) { send(res, 401, { error: 'Not authenticated' }); return; }
@@ -156,4 +167,4 @@ server.listen(PORT, () => {
   console.log(`listening on :${addr.port}`);
 });
 
-module.exports = { server, userStore, sessionStore, matchStore, matchHub };
+module.exports = { server, userStore, sessionStore, matchStore, matchHub, scoreStore };
