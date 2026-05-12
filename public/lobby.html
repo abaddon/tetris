@@ -95,9 +95,7 @@
           return r.json().then(function (data) { return { ok: r.ok, data: data }; });
         }).then(function (res) {
           if (res.ok) {
-            matchCodeDisplay.textContent = res.data.code;
-            matchPanel.classList.add('visible');
-            waitingLabel.textContent = 'Waiting for opponent to join…';
+            window.location.href = '/game.html?code=' + res.data.code + '&role=X';
           } else {
             statusEl.textContent = res.data.error || 'Failed to create match';
           }
