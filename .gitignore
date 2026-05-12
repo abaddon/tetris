@@ -1,6 +1,9 @@
 .claude/runs/
 .claude/worktrees/
 .claude/settings.local.json
+.claude/settings.json
 node_modules/
 data/
 public/game.js
+.idea
+*.iml
