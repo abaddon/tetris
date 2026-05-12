@@ -3,12 +3,14 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const { WebSocketServer } = require('ws');
 
 const { Router } = require('./router.js');
 const { readBody, send, parseCookies, setCookieHeader } = require('./http-helpers.js');
 const { ScryptHasher, MemorySessionStore } = require('./auth.js');
 const { JsonlUserStore } = require('./user-store.js');
 const { InMemoryMatchStore } = require('./match-store.js');
+const { MatchHub } = require('./match-hub.js');
 
 // ---- boot-time copy of shared/game.js -> public/game.js ----
 const sharedGame = path.join(__dirname, '../shared/game.js');
@@ -21,6 +23,7 @@ const userStore = new JsonlUserStore(path.join(dataDir, 'users.jsonl'));
 userStore.boot();
 const sessionStore = new MemorySessionStore();
 const matchStore = new InMemoryMatchStore();
+const matchHub = new MatchHub(matchStore, sessionStore);
 
 // ---- static file serving ----
 const PUBLIC_DIR = path.join(__dirname, '../public');
@@ -35,10 +38,7 @@ function serveStatic(req, res) {
   let urlPath = new URL(req.url, 'http://localhost').pathname;
   if (urlPath === '/') urlPath = '/index.html';
   const filePath = path.join(PUBLIC_DIR, urlPath);
-  // prevent directory traversal
-  if (!filePath.startsWith(PUBLIC_DIR)) {
-    res.writeHead(403); res.end(); return;
-  }
+  if (!filePath.startsWith(PUBLIC_DIR)) { res.writeHead(403); res.end(); return; }
   try {
     const data = fs.readFileSync(filePath);
     const ext = path.extname(filePath);
@@ -127,10 +127,27 @@ router.on('POST', '/api/matches/:code/join', (req, res, params) => {
   }
 });
 
-// ---- HTTP server ----
+// ---- HTTP + WS server ----
+const wss = new WebSocketServer({ noServer: true });
+
+wss.on('connection', (ws, req, username) => {
+  matchHub.handleConnection(ws, username);
+});
+
 const server = http.createServer((req, res) => {
   const handled = router.dispatch(req, res);
   if (handled === null) serveStatic(req, res);
+});
+
+server.on('upgrade', (req, socket, head) => {
+  const url = new URL(req.url, 'http://localhost');
+  if (url.pathname !== '/ws') { socket.destroy(); return; }
+  const cookies = parseCookies(req.headers['cookie']);
+  const username = sessionStore.lookup(cookies.sid || '');
+  if (!username) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    wss.emit('connection', ws, req, username);
+  });
 });
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -139,4 +156,4 @@ server.listen(PORT, () => {
   console.log(`listening on :${addr.port}`);
 });
 
-module.exports = { server, userStore, sessionStore, matchStore };
+module.exports = { server, userStore, sessionStore, matchStore, matchHub };

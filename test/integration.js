@@ -4,6 +4,7 @@
 // PORT env var must be set.
 
 const http = require('node:http');
+const { WebSocket } = require('ws');
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 let pass = 0;
@@ -309,6 +310,124 @@ async function run() {
     const r = await req('POST', `/api/matches/${joinCode2}/join`, null);
     assert(r.status === 401, 'story04: join 401 without session');
   }
+
+  // ---- Story 05: WebSocket smoke ----
+
+  // helper to open a WS with a sid cookie
+  function openWs(sidCookie) {
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`, { headers: { Cookie: sidCookie } });
+      ws.once('open', () => resolve(ws));
+      ws.once('error', reject);
+    });
+  }
+
+  // Message queue per WS — collects messages as they arrive, pops on demand
+  function makeQueue(ws) {
+    const q = [];
+    const waiters = [];
+    ws.on('message', (raw) => {
+      let msg; try { msg = JSON.parse(raw); } catch { return; }
+      if (waiters.length > 0) { waiters.shift()(msg); }
+      else { q.push(msg); }
+    });
+    ws.on('error', () => {});
+    return {
+      next(label) {
+        return new Promise((resolve, reject) => {
+          if (q.length > 0) { resolve(q.shift()); return; }
+          const timer = setTimeout(() => {
+            const idx = waiters.indexOf(resolver);
+            if (idx >= 0) waiters.splice(idx, 1);
+            reject(new Error('nextMsg timeout' + (label ? ': ' + label : '')));
+          }, 5000);
+          const resolver = (msg) => { clearTimeout(timer); resolve(msg); };
+          waiters.push(resolver);
+        });
+      }
+    };
+  }
+
+  // unauthenticated WS upgrade should be rejected (no sid)
+  {
+    let rejected = false;
+    await new Promise((resolve) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+      ws.once('error', () => { rejected = true; resolve(); });
+      ws.once('open', () => { ws.close(); resolve(); });
+      ws.once('unexpected-response', () => { rejected = true; resolve(); });
+    });
+    assert(rejected, 'story05: unauthenticated WS rejected');
+  }
+
+  // set up alice5 and bob5 for WS smoke
+  const alice5 = `alice5_${Date.now()}`;
+  const bob5 = `bob5_${Date.now()}`;
+  await req('POST', '/api/register', { username: alice5, password: p });
+  await req('POST', '/api/register', { username: bob5, password: p });
+
+  const ra5 = await req('POST', '/api/login', { username: alice5, password: p });
+  const rb5 = await req('POST', '/api/login', { username: bob5, password: p });
+  const a5Cookie = (ra5.headers['set-cookie']?.[0] || '').split(';')[0];
+  const b5Cookie = (rb5.headers['set-cookie']?.[0] || '').split(';')[0];
+
+  // alice creates match
+  const rmatch5 = await req('POST', '/api/matches', null, { Cookie: a5Cookie });
+  assert(rmatch5.status === 201, 'story05: alice creates match');
+  const code5 = rmatch5.data.code;
+
+  // alice connects WS, create queue BEFORE subscribing to capture all messages
+  const wsA = await openWs(a5Cookie);
+  const qA = makeQueue(wsA);
+  wsA.send(JSON.stringify({ type: 'subscribe', matchCode: code5 }));
+  const stateWaiting = await qA.next('alice initial state');
+  assert(stateWaiting.type === 'match.state', 'story05: alice gets match.state on subscribe');
+  assert(stateWaiting.status === 'waiting', 'story05: match status waiting before join');
+
+  // bob joins via HTTP then connects WS — create queue BEFORE subscribing
+  const rjoin5 = await req('POST', `/api/matches/${code5}/join`, null, { Cookie: b5Cookie });
+  assert(rjoin5.status === 200, 'story05: bob joins match');
+
+  const wsB = await openWs(b5Cookie);
+  const qB = makeQueue(wsB);
+  wsB.send(JSON.stringify({ type: 'subscribe', matchCode: code5 }));
+
+  // both should receive match.state reflecting the active match
+  const msgA = await qA.next('alice notified of bob join');
+  const msgB = await qB.next('bob initial state');
+  assert(msgA.type === 'match.state', 'story05: alice gets match.state when bob subscribes');
+  assert(msgB.type === 'match.state', 'story05: bob gets match.state on subscribe');
+  assert(msgA.status === 'active', 'story05: match is active after bob subscribes');
+  assert(msgB.playerO !== null, 'story05: bob sees playerO is set');
+
+  // alice (X) plays cell 0
+  wsA.send(JSON.stringify({ type: 'move', matchCode: code5, cell: 0 }));
+  const afterMoveA = await qA.next('alice state after move');
+  const afterMoveB = await qB.next('bob state after alice move');
+  assert(afterMoveA.type === 'match.state', 'story05: alice gets match.state after move');
+  assert(afterMoveA.board[0] === 'X', 'story05: cell 0 is X after alice moves');
+  assert(afterMoveB.board[0] === 'X', 'story05: bob sees X in cell 0');
+  assert(afterMoveA.turn === 'O', 'story05: turn is O after alice moves');
+
+  // bob (O) moves cell 1 — it's O's turn now
+  wsB.send(JSON.stringify({ type: 'move', matchCode: code5, cell: 1 }));
+  const afterBobMoveA = await qA.next('alice state after bob move');
+  const afterBobMoveB = await qB.next('bob state after his move');
+  assert(afterBobMoveB.type === 'match.state', 'story05: bob gets match.state after his move');
+  assert(afterBobMoveB.board[1] === 'O', 'story05: cell 1 is O after bob moves');
+  assert(afterBobMoveA.board[1] === 'O', 'story05: alice sees O in cell 1');
+
+  // it's X's turn again; bob (O) tries to play out of turn — should get error
+  wsB.send(JSON.stringify({ type: 'move', matchCode: code5, cell: 2 }));
+  const outOfTurn = await qB.next('bob out-of-turn error');
+  assert(outOfTurn.type === 'error', 'story05: out-of-turn move produces error');
+
+  // simulate disconnect of bob — close his socket and alice should get opponentLeft
+  wsB.close();
+  const disconnectMsg = await qA.next('alice opponentLeft');
+  assert(disconnectMsg.type === 'match.opponentLeft', 'story05: alice gets opponentLeft when bob disconnects');
+
+  wsA.close();
 
   // ---- results ----
   console.log(`\nIntegration: ${pass} passed, ${fail} failed`);

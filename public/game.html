@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tris — Match</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    gap: 1rem; padding: 2rem; margin: 0;
+  }
+  header { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; justify-content: center; }
+  h1 { margin: 0; font-size: 1.5rem; }
+  #player-info { font-size: 0.95rem; }
+  button {
+    padding: 0.5rem 1rem; font-size: 1rem; cursor: pointer;
+    border-radius: 4px; border: 1px solid #888; background: transparent; color: inherit;
+  }
+  #status { font-size: 1.1rem; min-height: 1.4em; }
+  #board {
+    display: grid;
+    grid-template-columns: repeat(3, 5rem);
+    grid-template-rows: repeat(3, 5rem);
+    gap: 4px; background: #888; padding: 4px; border-radius: 6px;
+  }
+  .cell {
+    background: #fff; color: #111;
+    font-size: 2.5rem; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; user-select: none; border: none; padding: 0;
+  }
+  .cell:disabled { cursor: not-allowed; opacity: 0.85; }
+  @media (prefers-color-scheme: dark) {
+    .cell { background: #1c1c1e; color: #f5f5f7; }
+  }
+  #actions { display: flex; gap: 0.5rem; }
+  #notice { font-size: 0.95rem; color: #c00; min-height: 1.2em; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Tris</h1>
+    <span id="player-info"></span>
+    <button id="lobby-btn" type="button">Lobby</button>
+  </header>
+  <div id="status" aria-live="polite">Connecting…</div>
+  <div id="board" role="grid" aria-label="Tic-tac-toe board"></div>
+  <div id="actions">
+    <button id="rematch-btn" type="button" style="display:none">Rematch</button>
+  </div>
+  <div id="notice" aria-live="polite"></div>
+  <script src="/game.js"></script>
+  <script>
+    (function () {
+      var params = new URLSearchParams(location.search);
+      var matchCode = params.get('code') || '';
+      var myRole = params.get('role') || '';
+
+      var statusEl = document.getElementById('status');
+      var boardEl = document.getElementById('board');
+      var playerInfoEl = document.getElementById('player-info');
+      var noticeEl = document.getElementById('notice');
+      var rematchBtn = document.getElementById('rematch-btn');
+      var cells = [];
+      var myUsername = '';
+
+      // Build grid cells
+      for (var i = 0; i < 9; i++) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'cell';
+        btn.setAttribute('role', 'gridcell');
+        btn.setAttribute('aria-label', 'cell ' + i);
+        btn.dataset.cell = String(i);
+        btn.disabled = true;
+        (function (idx) {
+          btn.addEventListener('click', function () {
+            if (!ws || ws.readyState !== 1) return;
+            ws.send(JSON.stringify({ type: 'move', matchCode: matchCode, cell: idx }));
+          });
+        })(i);
+        boardEl.appendChild(btn);
+        cells.push(btn);
+      }
+
+      // Fetch own username
+      fetch('/api/me').then(function (r) {
+        if (!r.ok) { window.location.href = '/login.html'; return null; }
+        return r.json();
+      }).then(function (data) {
+        if (!data) return;
+        myUsername = data.username;
+        playerInfoEl.textContent = myUsername + ' (' + (myRole || '?') + ')';
+        connectWs();
+      }).catch(function () {
+        window.location.href = '/login.html';
+      });
+
+      document.getElementById('lobby-btn').addEventListener('click', function () {
+        window.location.href = '/lobby.html';
+      });
+
+      rematchBtn.addEventListener('click', function () {
+        if (ws && ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: 'rematch', matchCode: matchCode }));
+        }
+        rematchBtn.style.display = 'none';
+      });
+
+      var ws;
+      function connectWs() {
+        var proto = location.protocol === 'https:' ? 'wss' : 'ws';
+        ws = new WebSocket(proto + '://' + location.host + '/ws');
+        ws.onopen = function () {
+          ws.send(JSON.stringify({ type: 'subscribe', matchCode: matchCode }));
+        };
+        ws.onmessage = function (e) {
+          var msg = JSON.parse(e.data);
+          handleMessage(msg);
+        };
+        ws.onclose = function () {
+          noticeEl.textContent = 'Connection lost';
+        };
+      }
+
+      function handleMessage(msg) {
+        switch (msg.type) {
+          case 'match.state':
+          case 'match.joined':
+            renderState(msg);
+            break;
+          case 'match.ended':
+            break; // state is sent separately
+          case 'match.rematch':
+            renderRematchTick(msg.ready);
+            break;
+          case 'match.opponentLeft':
+            noticeEl.textContent = 'Opponent disconnected';
+            disableBoard();
+            break;
+          case 'error':
+            noticeEl.textContent = msg.message || 'Error';
+            break;
+        }
+      }
+
+      function renderState(msg) {
+        noticeEl.textContent = '';
+        var board = msg.board;
+        var gameOver = msg.winner || msg.draw;
+
+        for (var i = 0; i < 9; i++) {
+          cells[i].textContent = board[i] || '';
+          // only enable cells on my turn if game still active
+          cells[i].disabled = gameOver || board[i] !== null || msg.turn !== msg.you;
+        }
+
+        var xName = msg.playerX || 'Player X';
+        var oName = msg.playerO || 'Waiting…';
+
+        if (msg.status === 'waiting' || !msg.playerO) {
+          statusEl.textContent = 'Waiting for opponent to join…';
+          disableBoard();
+        } else if (msg.winner) {
+          var winnerName = msg.winner === 'X' ? xName : oName;
+          statusEl.textContent = winnerName + ' wins!';
+          rematchBtn.style.display = '';
+          disableBoard();
+        } else if (msg.draw) {
+          statusEl.textContent = 'Draw!';
+          rematchBtn.style.display = '';
+          disableBoard();
+        } else {
+          var turnName = msg.turn === 'X' ? xName : oName;
+          statusEl.textContent = turnName + "'s turn";
+        }
+
+        playerInfoEl.textContent = myUsername + ' playing as ' + (msg.you || '?');
+      }
+
+      function renderRematchTick(ready) {
+        var parts = [];
+        if (ready.X) parts.push('X ready');
+        if (ready.O) parts.push('O ready');
+        noticeEl.textContent = parts.length ? 'Rematch: ' + parts.join(', ') : '';
+      }
+
+      function disableBoard() {
+        for (var i = 0; i < 9; i++) cells[i].disabled = true;
+      }
+    })();
+  </script>
+</body>
+</html>
