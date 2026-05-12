@@ -6,9 +6,10 @@ const PING_INTERVAL_MS = 30_000;
 const PONG_TIMEOUT_MS = 60_000;
 
 class MatchHub {
-  constructor(matchStore, sessionStore) {
+  constructor(matchStore, sessionStore, scoreStore) {
     this._matchStore = matchStore;
     this._sessionStore = sessionStore;
+    this._scoreStore = scoreStore || null;
     // matchCode -> Set<ws> (both players)
     this._rooms = new Map();
     // ws -> { username, matchCode, lastPong }
@@ -89,6 +90,10 @@ class MatchHub {
 
     if (next.winner || next.draw) {
       match.status = 'ended';
+      if (next.winner && this._scoreStore) {
+        const winnerUsername = next.winner === 'X' ? match.playerX : match.playerO;
+        this._scoreStore.award(winnerUsername).catch((err) => console.error('[match-hub] score award failed', err));
+      }
       this._broadcastState(match);
       this._broadcast(match.code, { type: 'match.ended', code: match.code, winner: next.winner, draw: next.draw });
     } else {

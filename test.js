@@ -196,9 +196,174 @@ function eq(actual, expected, label) {
   eq(topN(big, 10).length, 10, 'topN: returns at most 10 entries');
 }
 
-console.log(`\nTris tests: ${pass} passed, ${fail} failed`);
-if (fail > 0) {
-  console.log(failures.join('\n'));
-  process.exit(1);
-}
-process.exit(0);
+// ---- MatchHub win-scoring tests (AC-1 through AC-9, sprint-04 story 04) ----
+// Uses InMemoryScoreStore (no disk) and InMemoryMatchStore with mock WS objects.
+// Wrapped in an async IIFE so we can await the rejected-award microtask test (AC-5).
+(async () => {
+  const { InMemoryScoreStore } = require('./server/score-store.js');
+  const { InMemoryMatchStore } = require('./server/match-store.js');
+  const { MatchHub } = require('./server/match-hub.js');
+
+  // Minimal mock WebSocket: records sent messages, exposes event emitter API.
+  function makeMockWs() {
+    const listeners = {};
+    return {
+      readyState: 1, // OPEN
+      _sent: [],
+      send(raw) { this._sent.push(JSON.parse(raw)); },
+      on(event, handler) {
+        if (!listeners[event]) listeners[event] = [];
+        listeners[event].push(handler);
+      },
+      emit(event, ...args) {
+        (listeners[event] || []).forEach((h) => h(...args));
+      },
+      ping() {},
+    };
+  }
+
+  // Helper: set up alice (X) and bob (O) in an active match, both subscribed.
+  function setupMatch() {
+    const scoreStore = new InMemoryScoreStore();
+    const matchStore = new InMemoryMatchStore();
+    const hub = new MatchHub(matchStore, null, scoreStore);
+
+    const match = matchStore.create('alice');
+    matchStore.addOpponent(match.code, 'bob');
+
+    const wsA = makeMockWs();
+    const wsB = makeMockWs();
+    hub.handleConnection(wsA, 'alice');
+    hub.handleConnection(wsB, 'bob');
+    wsA.emit('message', JSON.stringify({ type: 'subscribe', matchCode: match.code }));
+    wsB.emit('message', JSON.stringify({ type: 'subscribe', matchCode: match.code }));
+    // Drain subscribe state messages
+    wsA._sent = [];
+    wsB._sent = [];
+
+    return { hub, matchStore, scoreStore, match, wsA, wsB };
+  }
+
+  // Helper: drive the board to one move before alice (X) wins top row (cells 0,1 -> 2)
+  function driveToAliceWin({ wsA, wsB }) {
+    // X plays 0, O plays 3, X plays 1, O plays 4, then X plays 2 to win
+    wsA.emit('message', JSON.stringify({ type: 'move', cell: 0 })); // X cell 0
+    wsB.emit('message', JSON.stringify({ type: 'move', cell: 3 })); // O cell 3
+    wsA.emit('message', JSON.stringify({ type: 'move', cell: 1 })); // X cell 1
+    wsB.emit('message', JSON.stringify({ type: 'move', cell: 4 })); // O cell 4
+    // Now play the winning move
+    wsA.emit('message', JSON.stringify({ type: 'move', cell: 2 })); // X cell 2 -> X wins
+  }
+
+  // Helper: drive to a full-board draw
+  // Board: X O X / X X O / O X O  (no winner)
+  function driveToDraw({ wsA, wsB }) {
+    wsA.emit('message', JSON.stringify({ type: 'move', cell: 0 })); // X
+    wsB.emit('message', JSON.stringify({ type: 'move', cell: 1 })); // O
+    wsA.emit('message', JSON.stringify({ type: 'move', cell: 2 })); // X
+    wsB.emit('message', JSON.stringify({ type: 'move', cell: 5 })); // O
+    wsA.emit('message', JSON.stringify({ type: 'move', cell: 3 })); // X
+    wsB.emit('message', JSON.stringify({ type: 'move', cell: 6 })); // O
+    wsA.emit('message', JSON.stringify({ type: 'move', cell: 7 })); // X
+    wsB.emit('message', JSON.stringify({ type: 'move', cell: 8 })); // O
+    wsA.emit('message', JSON.stringify({ type: 'move', cell: 4 })); // X fill -> draw
+  }
+
+  // AC-2: Winner gets exactly +1 point
+  {
+    const { scoreStore, wsA, wsB } = setupMatch();
+    driveToAliceWin({ wsA, wsB });
+    const alicePts = scoreStore._map.get('alice')?.pts ?? 0;
+    eq(alicePts, 1, 'scoring: winner alice gets +1 point after win');
+  }
+
+  // AC-3: Bob (loser) receives no points
+  {
+    const { scoreStore, wsA, wsB } = setupMatch();
+    driveToAliceWin({ wsA, wsB });
+    const bobPts = scoreStore._map.get('bob')?.pts ?? 0;
+    eq(bobPts, 0, 'scoring: loser bob gets 0 points after alice wins');
+  }
+
+  // AC-3: Draw awards nothing
+  {
+    const { scoreStore, wsA, wsB } = setupMatch();
+    driveToDraw({ wsA, wsB });
+    const alicePts = scoreStore._map.get('alice')?.pts ?? 0;
+    const bobPts = scoreStore._map.get('bob')?.pts ?? 0;
+    eq(alicePts, 0, 'scoring: alice gets 0 points on draw');
+    eq(bobPts, 0, 'scoring: bob gets 0 points on draw');
+  }
+
+  // AC-4: Abandoned match (bob disconnects) awards nothing
+  {
+    const { scoreStore, wsA, wsB } = setupMatch();
+    // Make one move so match is mid-game, then bob disconnects
+    wsA.emit('message', JSON.stringify({ type: 'move', cell: 0 })); // X plays
+    wsB.emit('close'); // bob disconnects
+    const alicePts = scoreStore._map.get('alice')?.pts ?? 0;
+    const bobPts = scoreStore._map.get('bob')?.pts ?? 0;
+    eq(alicePts, 0, 'scoring: alice gets 0 points on abandoned match');
+    eq(bobPts, 0, 'scoring: bob gets 0 points on abandoned match');
+  }
+
+  // AC-5: Rejected award does not crash hub; both clients still receive match.ended
+  {
+    const matchStore = new InMemoryMatchStore();
+    const rejectingStore = {
+      award() { return Promise.reject(new Error('disk error')); },
+    };
+    const hub = new MatchHub(matchStore, null, rejectingStore);
+    const match = matchStore.create('alice');
+    matchStore.addOpponent(match.code, 'bob');
+    const wsA = makeMockWs();
+    const wsB = makeMockWs();
+    hub.handleConnection(wsA, 'alice');
+    hub.handleConnection(wsB, 'bob');
+    wsA.emit('message', JSON.stringify({ type: 'subscribe', matchCode: match.code }));
+    wsB.emit('message', JSON.stringify({ type: 'subscribe', matchCode: match.code }));
+    wsA._sent = [];
+    wsB._sent = [];
+
+    // Play to alice win
+    wsA.emit('message', JSON.stringify({ type: 'move', cell: 0 }));
+    wsB.emit('message', JSON.stringify({ type: 'move', cell: 3 }));
+    wsA.emit('message', JSON.stringify({ type: 'move', cell: 1 }));
+    wsB.emit('message', JSON.stringify({ type: 'move', cell: 4 }));
+    wsA.emit('message', JSON.stringify({ type: 'move', cell: 2 })); // X wins
+
+    // Allow the rejected Promise's microtask to settle before asserting
+    await new Promise((r) => setImmediate(r));
+
+    const aEndedMsg = wsA._sent.find((m) => m.type === 'match.ended');
+    const bEndedMsg = wsB._sent.find((m) => m.type === 'match.ended');
+    eq(aEndedMsg !== undefined, true, 'scoring: alice still receives match.ended when award rejects');
+    eq(bEndedMsg !== undefined, true, 'scoring: bob still receives match.ended when award rejects');
+    eq(wsA.readyState, 1, 'scoring: alice WS not closed when award rejects');
+    eq(wsB.readyState, 1, 'scoring: bob WS not closed when award rejects');
+  }
+
+  // AC-6: Guard prevents double-scoring on replay (second move message after ended)
+  {
+    const { scoreStore, wsA, wsB } = setupMatch();
+    driveToAliceWin({ wsA, wsB });
+    // Try to send another move after the match has ended
+    wsA.emit('message', JSON.stringify({ type: 'move', cell: 5 }));
+    const alicePts = scoreStore._map.get('alice')?.pts ?? 0;
+    eq(alicePts, 1, 'scoring: replay after ended does not double-score alice');
+  }
+
+  // AC-1: MatchHub accepts scoreStore as 3rd constructor arg (verified structurally)
+  {
+    const store = new InMemoryScoreStore();
+    const hub = new MatchHub(new InMemoryMatchStore(), null, store);
+    eq(hub._scoreStore === store, true, 'scoring: MatchHub stores scoreStore from 3rd constructor arg');
+  }
+
+  console.log(`\nTris tests: ${pass} passed, ${fail} failed`);
+  if (fail > 0) {
+    console.log(failures.join('\n'));
+    process.exit(1);
+  }
+  process.exit(0);
+})().catch((err) => { console.error(err); process.exit(1); });
