@@ -32,6 +32,30 @@
   }
   #placeholder-title { font-weight: 600; margin-bottom: 0.5rem; }
   #placeholder-body { opacity: 0.85; font-size: 0.95rem; }
+  #leaderboard-container {
+    width: 100%;
+  }
+  #leaderboard-container.hidden { display: none; }
+  #scores-message {
+    border: 1px solid #888; border-radius: 6px; padding: 1.25rem;
+    width: 100%; text-align: center; font-size: 1rem;
+    box-sizing: border-box;
+  }
+  #scores-message.hidden { display: none; }
+  #scores-table {
+    width: 100%; border-collapse: collapse; border: 1px solid #888;
+    border-radius: 6px; overflow: hidden;
+  }
+  #scores-table caption {
+    font-size: 1rem; font-weight: 600; margin-bottom: 0.5rem; text-align: left;
+  }
+  #scores-table th, #scores-table td {
+    padding: 0.5rem 0.75rem; text-align: left;
+    border-bottom: 1px solid #888;
+  }
+  #scores-table th { font-weight: 600; }
+  #scores-table tr:last-child td { border-bottom: none; }
+  #scores-table tbody tr:focus { outline: 2px solid #888; }
 </style>
 </head>
 <body>
@@ -45,16 +69,87 @@
       <div id="placeholder-title">Coming soon</div>
       <div id="placeholder-body">No games scored yet. Once scoring lands, the top players will appear here.</div>
     </div>
+    <div id="leaderboard-container" class="hidden" aria-live="polite">
+      <table id="scores-table" aria-label="Top players leaderboard">
+        <caption>Top Players</caption>
+        <thead>
+          <tr>
+            <th scope="col">#</th>
+            <th scope="col">Player</th>
+            <th scope="col">Points</th>
+          </tr>
+        </thead>
+        <tbody id="scores-tbody">
+        </tbody>
+      </table>
+    </div>
+    <div id="scores-message" class="hidden" role="status" aria-live="polite"></div>
   </main>
   <script>
     (function () {
       var userInfoEl = document.getElementById('user-info');
+      var placeholderEl = document.getElementById('placeholder');
+      var leaderboardContainer = document.getElementById('leaderboard-container');
+      var scoresTbody = document.getElementById('scores-tbody');
+      var scoresMessage = document.getElementById('scores-message');
+
+      function hidePlaceholder() {
+        placeholderEl.style.display = 'none';
+      }
+
+      function showError(msg) {
+        hidePlaceholder();
+        scoresMessage.textContent = msg;
+        scoresMessage.classList.remove('hidden');
+      }
+
+      function renderScores(entries) {
+        hidePlaceholder();
+        if (!entries || entries.length === 0) {
+          scoresMessage.textContent = 'No scores yet — play a match to get on the board!';
+          scoresMessage.classList.remove('hidden');
+          return;
+        }
+        scoresTbody.innerHTML = '';
+        entries.forEach(function (entry, index) {
+          var tr = document.createElement('tr');
+          tr.setAttribute('tabindex', '0');
+          var tdRank = document.createElement('td');
+          tdRank.textContent = String(index + 1);
+          var tdUser = document.createElement('td');
+          tdUser.textContent = entry.username;
+          var tdPts = document.createElement('td');
+          tdPts.textContent = String(entry.pts);
+          tr.appendChild(tdRank);
+          tr.appendChild(tdUser);
+          tr.appendChild(tdPts);
+          scoresTbody.appendChild(tr);
+        });
+        leaderboardContainer.classList.remove('hidden');
+      }
+
+      function loadLeaderboard() {
+        fetch('/api/leaderboard').then(function (r) {
+          if (!r.ok) {
+            showError('Could not load scores — please try again.');
+            return null;
+          }
+          return r.json();
+        }).then(function (data) {
+          if (data === null) return;
+          renderScores(data);
+        }).catch(function () {
+          showError('Could not load scores — please try again.');
+        });
+      }
+
       fetch('/api/me').then(function (r) {
         if (!r.ok) { window.location.href = '/login.html'; return null; }
         return r.json();
       }).then(function (data) {
         if (!data) return;
         userInfoEl.textContent = 'Logged in as ' + data.username;
+        loadLeaderboard();
       }).catch(function () {
         window.location.href = '/login.html';
       });
