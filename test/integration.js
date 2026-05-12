@@ -223,6 +223,93 @@ async function run() {
     assert(rJoin.status === 404, `match cancelled on logout (got ${rJoin.status})`);
   }
 
+  // ---- Story 04: Join match by code ----
+
+  // register alice4 and bob4 as fresh users for this section
+  const alice4 = `alice4_${Date.now()}`;
+  const bob4 = `bob4_${Date.now()}`;
+  let aCookie = '';
+  let bCookie = '';
+
+  await req('POST', '/api/register', { username: alice4, password: p });
+  await req('POST', '/api/register', { username: bob4, password: p });
+
+  {
+    const r = await req('POST', '/api/login', { username: alice4, password: p });
+    aCookie = (r.headers['set-cookie']?.[0] || '').split(';')[0];
+  }
+  {
+    const r = await req('POST', '/api/login', { username: bob4, password: p });
+    bCookie = (r.headers['set-cookie']?.[0] || '').split(';')[0];
+  }
+
+  // alice creates a match
+  let joinCode = '';
+  {
+    const r = await req('POST', '/api/matches', null, { Cookie: aCookie });
+    assert(r.status === 201, `story04: alice creates match 201`);
+    joinCode = r.data.code;
+  }
+
+  // bob joins with uppercase code
+  {
+    const r = await req('POST', `/api/matches/${joinCode}/join`, null, { Cookie: bCookie });
+    assert(r.status === 200, `story04: bob joins match 200 (got ${r.status})`);
+    assert(r.data.role === 'O', 'bob is Player O');
+    assert(r.data.opponent === alice4, 'opponent is alice');
+    assert(r.data.code === joinCode, 'join response echoes code');
+  }
+
+  // match is now full — carol cannot join
+  {
+    const carol4 = `carol4_${Date.now()}`;
+    await req('POST', '/api/register', { username: carol4, password: p });
+    const rc = await req('POST', '/api/login', { username: carol4, password: p });
+    const carolCookie = (rc.headers['set-cookie']?.[0] || '').split(';')[0];
+    const r = await req('POST', `/api/matches/${joinCode}/join`, null, { Cookie: carolCookie });
+    assert(r.status === 409, `story04: full match 409 (got ${r.status})`);
+    assert(r.data.error === 'Match is already full', 'full match error message');
+  }
+
+  // alice creates a new match for self-join and case-insensitive tests
+  let joinCode2 = '';
+  {
+    const r = await req('POST', '/api/matches', null, { Cookie: aCookie });
+    assert(r.status === 201, `story04: alice creates match2`);
+    joinCode2 = r.data.code;
+  }
+
+  // alice tries to join her own match
+  {
+    const r = await req('POST', `/api/matches/${joinCode2}/join`, null, { Cookie: aCookie });
+    assert(r.status === 409, `story04: self-join 409`);
+    assert(r.data.error === 'You cannot join your own match', 'self-join error message');
+  }
+
+  // case-insensitive join (lowercase code)
+  {
+    const dave4 = `dave4_${Date.now()}`;
+    await req('POST', '/api/register', { username: dave4, password: p });
+    const rd = await req('POST', '/api/login', { username: dave4, password: p });
+    const daveCookie = (rd.headers['set-cookie']?.[0] || '').split(';')[0];
+    const r = await req('POST', `/api/matches/${joinCode2.toLowerCase()}/join`, null, { Cookie: daveCookie });
+    assert(r.status === 200, `story04: case-insensitive join 200`);
+    assert(r.data.role === 'O', 'case-insensitive join gives O role');
+  }
+
+  // unknown code returns 404
+  {
+    const r = await req('POST', '/api/matches/ZZZZ9/join', null, { Cookie: bCookie });
+    assert(r.status === 404, `story04: unknown code 404`);
+    assert(r.data.error === 'Match not found', 'unknown code error message');
+  }
+
+  // unauthenticated join returns 401
+  {
+    const r = await req('POST', `/api/matches/${joinCode2}/join`, null);
+    assert(r.status === 401, 'story04: join 401 without session');
+  }
+
   // ---- results ----
   console.log(`\nIntegration: ${pass} passed, ${fail} failed`);
   if (fail > 0) {
