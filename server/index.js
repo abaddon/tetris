@@ -88,6 +88,8 @@ router.on('POST', '/api/login', async (req, res) => {
 
 router.on('POST', '/api/logout', (req, res) => {
   const cookies = parseCookies(req.headers['cookie']);
+  const username = cookies.sid ? sessionStore.lookup(cookies.sid) : null;
+  if (username) matchStore.cancelOwned(username);
   if (cookies.sid) sessionStore.destroy(cookies.sid);
   res.writeHead(204, { 'Set-Cookie': setCookieHeader('sid', '', { maxAge: 0 }) });
   res.end();
@@ -103,8 +105,12 @@ router.on('POST', '/api/matches', (req, res) => {
   const username = getSession(req);
   if (!username) { send(res, 401, { error: 'Not authenticated' }); return; }
   matchStore.cancelOwned(username);
-  const match = matchStore.create(username);
-  send(res, 201, { code: match.code, role: 'X' });
+  try {
+    const match = matchStore.create(username);
+    send(res, 201, { code: match.code, role: 'X' });
+  } catch (err) {
+    send(res, 500, { error: err.message || 'Internal error' });
+  }
 });
 
 router.on('POST', '/api/matches/:code/join', (req, res, params) => {

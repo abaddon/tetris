@@ -10,7 +10,12 @@ class InMemoryMatchStore {
   }
 
   create(ownerUsername) {
-    const code = this._codeGen.next();
+    let code;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const candidate = this._codeGen.next();
+      if (!this._map.has(candidate.toUpperCase())) { code = candidate; break; }
+    }
+    if (!code) throw { code: 'CODE_COLLISION', message: 'Could not generate match code' };
     const match = {
       code,
       createdAt: Date.now(),

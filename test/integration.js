@@ -162,6 +162,67 @@ async function run() {
     assert(r.status === 401, '/api/me 401 without session');
   }
 
+  // ---- Story 03: Create match ----
+
+  // re-login to get a fresh session
+  let matchCookie = '';
+  {
+    const r = await req('POST', '/api/login', { username: u, password: p });
+    assert(r.status === 200, `re-login 200 for match tests`);
+    matchCookie = (r.headers['set-cookie']?.[0] || '').split(';')[0];
+  }
+
+  // create match — 201 with code and role X
+  let matchCode = '';
+  {
+    const r = await req('POST', '/api/matches', null, { Cookie: matchCookie });
+    assert(r.status === 201, `create match 201 (got ${r.status})`);
+    assert(typeof r.data.code === 'string', 'match code is string');
+    assert(r.data.code.length >= 4 && r.data.code.length <= 8, 'match code 4-8 chars');
+    assert(/^[A-Z2-9]+$/.test(r.data.code), 'match code uppercase alphanumeric');
+    assert(r.data.role === 'X', 'creator is Player X');
+    matchCode = r.data.code;
+  }
+
+  // creating a second match cancels the first
+  let matchCode2 = '';
+  {
+    const r = await req('POST', '/api/matches', null, { Cookie: matchCookie });
+    assert(r.status === 201, `second match 201`);
+    matchCode2 = r.data.code;
+    assert(matchCode2 !== matchCode, 'new code differs from cancelled code');
+  }
+
+  // first code is no longer joinable after cancellation
+  {
+    const u2 = `user2_${Date.now()}`;
+    await req('POST', '/api/register', { username: u2, password: p });
+    const r2 = await req('POST', '/api/login', { username: u2, password: p });
+    const c2 = (r2.headers['set-cookie']?.[0] || '').split(';')[0];
+    const r = await req('POST', `/api/matches/${matchCode}/join`, null, { Cookie: c2 });
+    assert(r.status === 404, `cancelled match not joinable (got ${r.status})`);
+    assert(r.data.error === 'Match not found', `cancelled match error message`);
+  }
+
+  // unauthenticated create match returns 401
+  {
+    const r = await req('POST', '/api/matches', null);
+    assert(r.status === 401, 'create match 401 without session');
+  }
+
+  // logout cancels pending match
+  {
+    const r = await req('POST', '/api/logout', null, { Cookie: matchCookie });
+    assert(r.status === 204, 'logout 204 (match cancel)');
+    // matchCode2 should now be gone — login as another user to check
+    const u3 = `user3_${Date.now()}`;
+    await req('POST', '/api/register', { username: u3, password: p });
+    const r3 = await req('POST', '/api/login', { username: u3, password: p });
+    const c3 = (r3.headers['set-cookie']?.[0] || '').split(';')[0];
+    const rJoin = await req('POST', `/api/matches/${matchCode2}/join`, null, { Cookie: c3 });
+    assert(rJoin.status === 404, `match cancelled on logout (got ${rJoin.status})`);
+  }
+
   // ---- results ----
   console.log(`\nIntegration: ${pass} passed, ${fail} failed`);
   if (fail > 0) {
