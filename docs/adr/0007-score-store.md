@@ -54,12 +54,12 @@ following the exact shape of `UserStore` / `JsonlUserStore` /
 
 ```
 award(usernameDisplay) -> Promise<void>
-top(n)                 -> Promise<[{ name, pts }, ...]>
+topN(n)                -> Promise<[{ name, pts }, ...]>
 ```
 
 - `award` increments the named user's total by exactly 1.
-- `top` returns at most `n` entries ranked by `pts` DESC, name ASC for
-  ties. The HTTP layer always calls `top(10)`; the cap is policy, not a
+- `topN` returns at most `n` entries ranked by `pts` DESC, name ASC for
+  ties. The HTTP layer always calls `topN(10)`; the cap is policy, not a
   hard limit of the port. `n` defaults to 10.
 - The port deals in **display names** (`usernameDisplay`). The
   case-insensitive identity key (`usernameLower`) is internal to the
@@ -134,7 +134,13 @@ async award(usernameDisplay) {
   cur.usernameDisplay = usernameDisplay; // preserves casing of latest award
   this._map.set(lower, cur);
   const line = JSON.stringify({ usernameLower: lower, usernameDisplay, delta: 1, at: Date.now() }) + '\n';
-  fs.appendFileSync(this._file, line);  // synchronous; resolves the Promise on return
+  const fd = fs.openSync(this._file, 'a');
+  try {
+    fs.writeSync(fd, line);
+    fs.fsyncSync(fd);           // durability guarantee from AC-3
+  } finally {
+    fs.closeSync(fd);           // fd always closed, even if write/fsync throws
+  }
 }
 ```
 
@@ -146,10 +152,11 @@ JSDoc** so a future dev who is tempted to introduce `await
 fs.promises.appendFile` understands they would also need to add a
 serialisation primitive.
 
-Error handling: a `fs.appendFileSync` failure throws synchronously,
-which rejects the returned Promise. Story 04 AC-5 says callers
-(MatchHub) must `.catch(console.error)` the rejection without
-disconnecting clients. The store itself **never swallows** the error.
+Error handling: a `fs.writeSync` or `fs.fsyncSync` failure throws
+synchronously (the try/finally closes the fd before propagating), which
+rejects the returned Promise. Story 04 AC-5 says callers (MatchHub)
+must `.catch(console.error)` the rejection without disconnecting
+clients. The store itself **never swallows** the error.
 
 ### Match-end hook (story 04)
 
@@ -175,13 +182,13 @@ call `award`. The branch is gated on `next.winner` truthiness.
 
 ### Top-N cap
 
-The HTTP handler `GET /api/leaderboard` calls `scoreStore.top(10)`.
+The HTTP handler `GET /api/leaderboard` calls `scoreStore.topN(10)`.
 Ten is the user-visible cap (story 03 AC, story 05 AC). Story 03's
 scenario "more than 10 recorded players caps at 10" is satisfied by
 the existing `topN` slice in `shared/game.js` (see test.js line 196).
 The number `10` lives in the HTTP handler — not as a hardcoded
 constant inside the store — so a future "show top 25" view can call
-`top(25)` without an adapter change.
+`topN(25)` without an adapter change.
 
 ## Consequences
 
@@ -218,7 +225,7 @@ constant inside the store — so a future "show top 25" view can call
   - `award(usernameDisplay) -> Promise<void>` — increments by 1.
     Delegates to `awardWin` from `shared/game.js`. Synchronous body;
     `async` only for signature uniformity.
-  - `top(n = 10) -> Promise<[{ name, pts }, ...]>` — delegates to
+  - `topN(n = 10) -> Promise<[{ name, pts }, ...]>` — delegates to
     `topN` from `shared/game.js`. Caller passes the cap.
 - `JsonlScoreStore` (production adapter): `data/scores.jsonl`,
   append-only, replay-sums-increments, torn-line-tolerant.
@@ -247,7 +254,7 @@ sequenceDiagram
     H->>M: match.status = 'ended'
     H->>S: award("Alice")
     S->>S: awardWin(map, "Alice")  (sync, single-threaded)
-    S->>F: appendFileSync one JSONL line
+    S->>F: writeSync + fsyncSync one JSONL line
     S-->>H: Promise<void> resolved
     H->>C1: ws { type:"match.state", ... }
     H->>C2: ws { type:"match.state", ... }
@@ -256,7 +263,7 @@ sequenceDiagram
 
     Note over C1,H: later — leaderboard request
     C1->>H: GET /api/leaderboard (auth via session cookie)
-    H->>S: top(10)
+    H->>S: topN(10)
     S->>S: topN(projectedMap, 10)
     S-->>H: [{name,pts}, ...]
     H-->>C1: 200 application/json

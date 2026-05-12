@@ -12,7 +12,7 @@ const { awardWin, topN } = require('../shared/game.js');
  * On boot the file is replayed line-by-line, summing deltas into an in-memory Map.
  *
  * IMPORTANT: `award` is `async` only for port-signature uniformity. Its body
- * contains NO `await` points: the Map update and the `fs.appendFileSync` both
+ * contains NO `await` points: the Map update, the fd write, and the fsync all
  * run synchronously inside a single JS task. This is the load-bearing
  * "single-threaded Node" assumption described in ADR-0007. Any future refactor
  * that introduces `await fs.promises.appendFile` here MUST also add explicit
@@ -79,7 +79,13 @@ class JsonlScoreStore {
     cur.usernameDisplay = usernameDisplay; // preserve casing of latest call
     this._map.set(lower, cur);
     const line = JSON.stringify({ usernameLower: lower, usernameDisplay, delta: 1, at: Date.now() }) + '\n';
-    fs.appendFileSync(this._file, line);
+    const fd = fs.openSync(this._file, 'a');
+    try {
+      fs.writeSync(fd, line);
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
   }
 
   /**
@@ -89,7 +95,7 @@ class JsonlScoreStore {
    * @param {number} [n=10]
    * @returns {Promise<Array<{ name: string, pts: number }>>}
    */
-  async top(n = 10) {
+  async topN(n = 10) {
     // Build a plain object store { [usernameDisplay]: pts } for topN
     const storeObj = {};
     for (const { usernameDisplay, pts } of this._map.values()) {
@@ -127,7 +133,7 @@ class InMemoryScoreStore {
    * @param {number} [n=10]
    * @returns {Promise<Array<{ name: string, pts: number }>>}
    */
-  async top(n = 10) {
+  async topN(n = 10) {
     const storeObj = {};
     for (const { usernameDisplay, pts } of this._map.values()) {
       storeObj[usernameDisplay] = pts;

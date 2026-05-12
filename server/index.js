@@ -107,7 +107,7 @@ router.on('GET', '/api/me', (req, res) => {
 router.on('GET', '/api/leaderboard', async (req, res) => {
   const username = getSession(req);
   if (!username) { send(res, 401, { error: 'Not authenticated' }); return; }
-  const entries = await scoreStore.top(10);
+  const entries = await scoreStore.topN(10);
   // Port returns { name, pts }; public API schema uses { username, pts }
   send(res, 200, entries.map(({ name, pts }) => ({ username: name, pts })));
 });

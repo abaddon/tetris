@@ -137,15 +137,16 @@ Behavior:
 
 ```
 award(usernameDisplay) -> Promise<void>          // +1; delegates to shared/game.js#awardWin
-top(n = 10)            -> Promise<[{ name, pts }, ...]>   // delegates to shared/game.js#topN
+topN(n = 10)           -> Promise<[{ name, pts }, ...]>   // delegates to shared/game.js#topN
 ```
 
 - `award` is synchronous in its body (no `await` inside); the returned
-  Promise resolves once the in-memory map is updated AND the JSONL
-  line has been `fs.appendFileSync`'d. See ADR-0007 for the
-  "single-threaded Node" assumption that makes concurrent calls safe
-  without explicit serialisation.
-- `top` returns at most `n` entries, sorted `pts` DESC then `name`
+  Promise resolves once the in-memory map is updated AND the JSONL line
+  has been written and fsynced (`fs.writeSync` + `fs.fsyncSync` inside
+  a try/finally). See ADR-0007 for the "single-threaded Node"
+  assumption that makes concurrent calls safe without explicit
+  serialisation.
+- `topN` returns at most `n` entries, sorted `pts` DESC then `name`
   ASC. The HTTP handler passes `n = 10`.
 - `name` in the returned shape is the user's display name
   (`usernameDisplay`), not the lowercase key.
@@ -164,7 +165,7 @@ Consumed by:
   logged to `console.error`; the WS broadcast continues regardless.
 - `GET /api/leaderboard` HTTP handler in `server/index.js`
   (sprint-04 story 03) — auth-gated (401 without session); calls
-  `scoreStore.top(10)`; responds with
+  `scoreStore.topN(10)`; responds with
   `[{ username, pts }, ...]` JSON (the handler maps `name -> username`
   to match the public API schema in the story).
 

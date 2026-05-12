@@ -470,6 +470,95 @@ async function run() {
     assert(Array.isArray(r.data) && r.data.length <= 10, `sprint04-s03: leaderboard capped at 10 (got ${r.data?.length})`);
   }
 
+  // ---- Sprint-04 Story 04: Win awards a leaderboard point ----
+
+  const winnerX = `winnerX_${Date.now()}`;
+  const loserO = `loserO_${Date.now()}`;
+  let winnerCookie = '';
+  {
+    await req('POST', '/api/register', { username: winnerX, password: p });
+    await req('POST', '/api/register', { username: loserO, password: p });
+    const rW = await req('POST', '/api/login', { username: winnerX, password: p });
+    const rL = await req('POST', '/api/login', { username: loserO, password: p });
+    assert(rW.status === 200, `sprint04-s04: winnerX login 200 (got ${rW.status})`);
+    assert(rL.status === 200, `sprint04-s04: loserO login 200 (got ${rL.status})`);
+    winnerCookie = (rW.headers['set-cookie']?.[0] || '').split(';')[0];
+    const loserCookie = (rL.headers['set-cookie']?.[0] || '').split(';')[0];
+
+    // winner creates match (X), loser joins (O)
+    const rMatch = await req('POST', '/api/matches', null, { Cookie: winnerCookie });
+    assert(rMatch.status === 201, `sprint04-s04: winnerX creates match (got ${rMatch.status})`);
+    const matchCode = rMatch.data.code;
+
+    const rJoin = await req('POST', `/api/matches/${matchCode}/join`, null, { Cookie: loserCookie });
+    assert(rJoin.status === 200, `sprint04-s04: loserO joins match (got ${rJoin.status})`);
+
+    // open websockets for both players
+    const wsW = await openWs(winnerCookie);
+    const wsL = await openWs(loserCookie);
+    const qW = makeQueue(wsW);
+    const qL = makeQueue(wsL);
+
+    // both subscribe
+    wsW.send(JSON.stringify({ type: 'subscribe', matchCode }));
+    const initW = await qW.next('winnerX initial state');
+    assert(initW.type === 'match.state', 'sprint04-s04: winnerX gets match.state on subscribe');
+
+    wsL.send(JSON.stringify({ type: 'subscribe', matchCode }));
+    // drain both queues for the join-triggered state update
+    await qW.next('winnerX state after loserO subscribes');
+    const initL = await qL.next('loserO initial state');
+    assert(initL.type === 'match.state', 'sprint04-s04: loserO gets match.state on subscribe');
+    assert(initL.status === 'active', 'sprint04-s04: match is active');
+
+    // play to a top-row win: X takes 0,1,2; O takes 3,4
+    // move 1: X plays cell 0
+    wsW.send(JSON.stringify({ type: 'move', matchCode, cell: 0 }));
+    await qW.next('winnerX state after cell 0');
+    await qL.next('loserO state after cell 0');
+
+    // move 2: O plays cell 3
+    wsL.send(JSON.stringify({ type: 'move', matchCode, cell: 3 }));
+    await qW.next('winnerX state after cell 3');
+    await qL.next('loserO state after cell 3');
+
+    // move 3: X plays cell 1
+    wsW.send(JSON.stringify({ type: 'move', matchCode, cell: 1 }));
+    await qW.next('winnerX state after cell 1');
+    await qL.next('loserO state after cell 1');
+
+    // move 4: O plays cell 4
+    wsL.send(JSON.stringify({ type: 'move', matchCode, cell: 4 }));
+    await qW.next('winnerX state after cell 4');
+    await qL.next('loserO state after cell 4');
+
+    // move 5: X plays cell 2 — top-row win (0,1,2)
+    wsW.send(JSON.stringify({ type: 'move', matchCode, cell: 2 }));
+    // each player receives match.state then match.ended
+    const winStateW = await qW.next('winnerX final state');
+    const winEndedW = await qW.next('winnerX match.ended');
+    const winStateL = await qL.next('loserO final state');
+    const winEndedL = await qL.next('loserO match.ended');
+
+    assert(winStateW.type === 'match.state', 'sprint04-s04: winnerX gets final match.state');
+    assert(winEndedW.type === 'match.ended', `sprint04-s04: winnerX gets match.ended (got ${winEndedW.type})`);
+    assert(winEndedW.winner === 'X', `sprint04-s04: match.ended winner is 'X' (got ${winEndedW.winner})`);
+    assert(winStateL.type === 'match.state', 'sprint04-s04: loserO gets final match.state');
+    assert(winEndedL.type === 'match.ended', `sprint04-s04: loserO gets match.ended (got ${winEndedL.type})`);
+
+    wsW.close();
+    wsL.close();
+  }
+
+  // GET /api/leaderboard with winner's cookie — must include winner with pts >= 1
+  {
+    const r = await req('GET', '/api/leaderboard', null, { Cookie: winnerCookie });
+    assert(r.status === 200, `sprint04-s04: GET /api/leaderboard 200 after win (got ${r.status})`);
+    const entry = Array.isArray(r.data) && r.data.find((e) => e.username === winnerX);
+    assert(!!entry, `sprint04-s04: leaderboard contains winner ${winnerX}`);
+    assert(entry && entry.pts >= 1, `sprint04-s04: winner has pts >= 1 (got ${entry ? entry.pts : 'none'})`);
+  }
+
   // ---- results ----
   console.log(`\nIntegration: ${pass} passed, ${fail} failed`);
   if (fail > 0) {
