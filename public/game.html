@@ -109,6 +109,27 @@
         rematchBtn.style.display = 'none';
       });
 
+      // ---- leaderboard (localStorage, same pattern as sprint-02) ----
+      var LEADERBOARD_KEY = 'tris_leaderboard';
+      var _leaderboardUpdatedForMatch = false;
+
+      function loadLeaderboard() {
+        try { var r = localStorage.getItem(LEADERBOARD_KEY); return r ? JSON.parse(r) : {}; }
+        catch (e) { return null; }
+      }
+
+      function saveLeaderboard(data) {
+        try { localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(data)); } catch (e) {}
+      }
+
+      function recordWin(winnerName) {
+        if (_leaderboardUpdatedForMatch) return;
+        _leaderboardUpdatedForMatch = true;
+        var data = loadLeaderboard();
+        if (data === null) return;
+        saveLeaderboard(awardWin(data, winnerName));
+      }
+
       var ws;
       function connectWs() {
         var proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -148,6 +169,8 @@
 
       function renderState(msg) {
         noticeEl.textContent = '';
+        // reset leaderboard flag when a new game begins (rematch)
+        if (!msg.winner && !msg.draw && msg.status === 'active') _leaderboardUpdatedForMatch = false;
         var board = msg.board;
         var gameOver = msg.winner || msg.draw;
 
@@ -166,6 +189,7 @@
         } else if (msg.winner) {
           var winnerName = msg.winner === 'X' ? xName : oName;
           statusEl.textContent = winnerName + ' wins!';
+          recordWin(winnerName);
           rematchBtn.style.display = '';
           disableBoard();
         } else if (msg.draw) {
