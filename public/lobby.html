@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tris — Lobby</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    gap: 1rem; padding: 2rem; margin: 0;
+  }
+  header {
+    display: flex; gap: 1rem; align-items: center; justify-content: center;
+    flex-wrap: wrap;
+  }
+  h1 { margin: 0; font-size: 1.5rem; }
+  #user-info { font-size: 0.95rem; }
+  button {
+    padding: 0.5rem 1rem; font-size: 1rem; cursor: pointer;
+    border-radius: 4px; border: 1px solid #888; background: transparent; color: inherit;
+  }
+  #lobby-actions { display: flex; flex-direction: column; gap: 0.75rem; align-items: center; width: 20rem; max-width: 100%; }
+  #status { font-size: 0.95rem; color: #555; min-height: 1.2em; }
+  a { color: inherit; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Tris</h1>
+    <span id="user-info"></span>
+    <button id="logout-btn" type="button">Log out</button>
+  </header>
+  <main>
+    <div id="lobby-actions">
+      <button id="create-match-btn" type="button">Create match</button>
+      <div id="status" aria-live="polite"></div>
+    </div>
+  </main>
+  <script>
+    (function () {
+      var statusEl = document.getElementById('status');
+      var userInfoEl = document.getElementById('user-info');
+
+      fetch('/api/me').then(function (r) {
+        if (!r.ok) { window.location.href = '/login.html'; return; }
+        return r.json();
+      }).then(function (data) {
+        if (!data) return;
+        userInfoEl.textContent = 'Logged in as ' + data.username;
+      }).catch(function () {
+        window.location.href = '/login.html';
+      });
+
+      document.getElementById('logout-btn').addEventListener('click', function () {
+        fetch('/api/logout', { method: 'POST' }).then(function () {
+          window.location.href = '/login.html';
+        });
+      });
+
+      document.getElementById('create-match-btn').addEventListener('click', function () {
+        statusEl.textContent = 'Creating match…';
+        fetch('/api/matches', { method: 'POST' }).then(function (r) {
+          return r.json().then(function (data) { return { ok: r.ok, data: data }; });
+        }).then(function (res) {
+          if (res.ok) {
+            statusEl.textContent = 'Match code: ' + res.data.code;
+          } else {
+            statusEl.textContent = res.data.error || 'Failed to create match';
+          }
+        }).catch(function () {
+          statusEl.textContent = 'Network error';
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

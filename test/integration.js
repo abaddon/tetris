@@ -48,42 +48,43 @@ async function run() {
   const u = `user_${Date.now()}`;
   const p = 'Password1!';
 
-  // --- register ---
+  // ---- Story 01: Register ----
+
   {
     const r = await req('POST', '/api/register', { username: u, password: p });
     assert(r.status === 201, `register 201 (got ${r.status})`);
     assert(r.data.ok === true, 'register body ok:true');
   }
 
-  // --- duplicate register ---
+  // duplicate register
   {
     const r = await req('POST', '/api/register', { username: u, password: p });
     assert(r.status === 400, `duplicate register 400 (got ${r.status})`);
     assert(r.data.error === 'Username already taken', `duplicate error message`);
   }
 
-  // --- validation: blank username ---
+  // blank username
   {
     const r = await req('POST', '/api/register', { username: '', password: p });
     assert(r.status === 400, `blank username 400`);
     assert(r.data.error === 'Username is required', `blank username error`);
   }
 
-  // --- validation: short password ---
+  // short password
   {
     const r = await req('POST', '/api/register', { username: `${u}b`, password: 'short' });
     assert(r.status === 400, `short password 400`);
     assert(r.data.error === 'Password must be at least 8 characters', `short password error`);
   }
 
-  // --- validation: invalid chars ---
+  // invalid chars
   {
     const r = await req('POST', '/api/register', { username: 'ali ce!', password: p });
     assert(r.status === 400, `invalid chars 400`);
     assert(r.data.error === 'Username may only contain letters, digits, and underscores', `invalid chars error`);
   }
 
-  // --- case-insensitive uniqueness ---
+  // case-insensitive uniqueness
   {
     const upper = u.toUpperCase();
     const r = await req('POST', '/api/register', { username: upper, password: p });
@@ -91,7 +92,9 @@ async function run() {
     assert(r.data.error === 'Username already taken', `case-insensitive dupe error`);
   }
 
-  // --- login ---
+  // ---- Story 02: Login ----
+
+  // successful login
   let cookie = '';
   {
     const r = await req('POST', '/api/login', { username: u, password: p });
@@ -100,20 +103,63 @@ async function run() {
     cookie = r.headers['set-cookie']?.[0] || '';
     assert(cookie.includes('sid='), 'login sets sid cookie');
     assert(cookie.includes('HttpOnly'), 'cookie is HttpOnly');
+    assert(cookie.includes('SameSite=Lax'), 'cookie SameSite=Lax');
   }
 
-  // --- /api/me ---
+  // /api/me — session survives (simulates reload)
+  const sidVal = cookie.split(';')[0];
   {
-    const sidVal = cookie.split(';')[0];
     const r = await req('GET', '/api/me', null, { Cookie: sidVal });
-    assert(r.status === 200, `/api/me 200`);
+    assert(r.status === 200, `/api/me 200 (session persists)`);
     assert(r.data.username.toLowerCase() === u.toLowerCase(), `/api/me returns username`);
   }
 
-  // --- static: register.html reachable ---
+  // wrong password
+  {
+    const r = await req('POST', '/api/login', { username: u, password: 'wrongpass1' });
+    assert(r.status === 401, `wrong password 401`);
+    assert(r.data.error === 'Invalid username or password', `wrong password error message`);
+  }
+
+  // non-existent username — same generic error (no info leak)
+  {
+    const r = await req('POST', '/api/login', { username: 'ghost_nobody', password: p });
+    assert(r.status === 401, `non-existent user 401`);
+    assert(r.data.error === 'Invalid username or password', `non-existent user error message`);
+  }
+
+  // logout
+  {
+    const r = await req('POST', '/api/logout', null, { Cookie: sidVal });
+    assert(r.status === 204, `logout 204`);
+    const clearCookie = r.headers['set-cookie']?.[0] || '';
+    assert(clearCookie.includes('Max-Age=0'), 'logout clears cookie');
+  }
+
+  // after logout, /api/me returns 401
+  {
+    const r = await req('GET', '/api/me', null, { Cookie: sidVal });
+    assert(r.status === 401, `/api/me 401 after logout`);
+  }
+
+  // static pages reachable
   {
     const r = await req('GET', '/register.html', null);
     assert(r.status === 200, 'register.html served');
+  }
+  {
+    const r = await req('GET', '/login.html', null);
+    assert(r.status === 200, 'login.html served');
+  }
+  {
+    const r = await req('GET', '/lobby.html', null);
+    assert(r.status === 200, 'lobby.html served');
+  }
+
+  // unauthenticated /api/me returns 401
+  {
+    const r = await req('GET', '/api/me', null);
+    assert(r.status === 401, '/api/me 401 without session');
   }
 
   // ---- results ----

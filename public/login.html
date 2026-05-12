@@ -47,8 +47,12 @@
       e.preventDefault();
       var errEl = document.getElementById('error');
       errEl.textContent = '';
-      var username = document.getElementById('username').value;
+      var username = document.getElementById('username').value.trim();
       var password = document.getElementById('password').value;
+      if (!username) {
+        errEl.textContent = 'Username is required';
+        return;
+      }
       try {
         var res = await fetch('/api/login', {
           method: 'POST',
@@ -57,7 +61,7 @@
         });
         var data = await res.json();
         if (res.ok) {
-          window.location.href = '/';
+          window.location.href = '/lobby.html';
         } else {
           errEl.textContent = data.error || 'Login failed';
         }
