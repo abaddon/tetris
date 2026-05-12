@@ -2,5 +2,39 @@
 # Project verify shim. Smurf agents call ONLY this script.
 set -euo pipefail
 
-# Run headless tests for the Tris game pure logic.
+# 1. Pure-logic tests (no server needed)
 node test.js
+
+# 2. Install dependencies (idempotent)
+npm install --no-audit --no-fund --silent
+
+# 3. Start server on an ephemeral port; capture actual port from stdout
+SERVER_PID=""
+TMPLOG=$(mktemp)
+
+cleanup() {
+  [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true
+  rm -f "$TMPLOG"
+}
+trap cleanup EXIT
+
+PORT=0 node server/index.js >"$TMPLOG" 2>&1 &
+SERVER_PID=$!
+
+ACTUAL_PORT=""
+for i in $(seq 1 50); do
+  sleep 0.1
+  if grep -q "listening on :" "$TMPLOG" 2>/dev/null; then
+    ACTUAL_PORT=$(grep "listening on :" "$TMPLOG" | head -1 | sed 's/.*listening on ://')
+    break
+  fi
+done
+
+if [ -z "$ACTUAL_PORT" ]; then
+  echo "ERROR: server did not start in time" >&2
+  cat "$TMPLOG" >&2
+  exit 1
+fi
+
+# 4. Run integration smoke test
+PORT="$ACTUAL_PORT" node test/integration.js

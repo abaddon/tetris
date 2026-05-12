@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tris — Login</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    gap: 1rem; padding: 2rem; margin: 0;
+  }
+  h1 { margin: 0; font-size: 1.5rem; }
+  form { display: flex; flex-direction: column; gap: 0.75rem; width: 20rem; max-width: 100%; }
+  label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.9rem; }
+  input {
+    padding: 0.4rem 0.6rem; font-size: 1rem; border-radius: 4px;
+    border: 1px solid #888; background: transparent; color: inherit;
+  }
+  button {
+    padding: 0.5rem 1rem; font-size: 1rem; cursor: pointer;
+    border-radius: 4px; border: 1px solid #888; background: transparent; color: inherit;
+  }
+  #error { color: #c00; min-height: 1.4em; font-size: 0.95rem; }
+  a { color: inherit; }
+</style>
+</head>
+<body>
+  <h1>Tris</h1>
+  <h2>Log in</h2>
+  <form id="login-form" novalidate>
+    <label>
+      Username
+      <input id="username" name="username" type="text" autocomplete="username" required />
+    </label>
+    <label>
+      Password
+      <input id="password" name="password" type="password" autocomplete="current-password" required />
+    </label>
+    <div id="error" role="alert" aria-live="polite"></div>
+    <button type="submit">Log in</button>
+  </form>
+  <p>No account yet? <a href="/register.html">Register</a></p>
+  <script>
+    document.getElementById('login-form').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      var errEl = document.getElementById('error');
+      errEl.textContent = '';
+      var username = document.getElementById('username').value;
+      var password = document.getElementById('password').value;
+      try {
+        var res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password }),
+        });
+        var data = await res.json();
+        if (res.ok) {
+          window.location.href = '/';
+        } else {
+          errEl.textContent = data.error || 'Login failed';
+        }
+      } catch (err) {
+        errEl.textContent = 'Network error — please try again';
+      }
+    });
+  </script>
+</body>
+</html>

@@ -3,7 +3,7 @@
 // Run: `node test.js` (also invoked by ./verify.sh).
 'use strict';
 
-const { createGame, play, statusText, fromString, resolveName, applyResult, awardWin, topN } = require('./game.js');
+const { createGame, play, statusText, fromString, resolveName, applyResult, awardWin, topN } = require('./shared/game.js');
 
 let pass = 0;
 let fail = 0;

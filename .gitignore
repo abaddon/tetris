@@ -1,0 +1,6 @@
+.claude/runs/
+.claude/worktrees/
+.claude/settings.local.json
+node_modules/
+data/
+public/game.js
