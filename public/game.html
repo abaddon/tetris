@@ -58,6 +58,7 @@
       var matchCode = params.get('code') || '';
       var myRole = params.get('role') || '';
       var mode = params.get('mode') || '';
+      var difficultyParam = params.get('difficulty') || '';
 
       var statusEl = document.getElementById('status');
       var boardEl = document.getElementById('board');
@@ -84,6 +85,15 @@
         })(i);
         boardEl.appendChild(btn);
         cells.push(btn);
+      }
+
+      // AC-6: Show difficulty label when mode=computer
+      if (mode === 'computer' && difficultyParam) {
+        var diffLabel = document.createElement('span');
+        diffLabel.id = 'difficulty-label';
+        var capitalised = difficultyParam.charAt(0).toUpperCase() + difficultyParam.slice(1);
+        diffLabel.textContent = 'Difficulty: ' + capitalised;
+        playerInfoEl.parentNode.insertBefore(diffLabel, playerInfoEl.nextSibling);
       }
 
       // Fetch own username

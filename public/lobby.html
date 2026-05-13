@@ -60,6 +60,17 @@
           <button id="copy-btn" type="button">Copy code</button>
         </div>
         <div id="waiting-label" aria-live="polite">Waiting for opponent to join…</div>
+        <div id="difficulty-row" style="display:flex;gap:0.5rem;align-items:center;">
+          <label for="difficulty-select">Difficulty</label>
+          <select id="difficulty-select">
+            <option value="trivial">Trivial</option>
+            <option value="easy">Easy</option>
+            <option value="medium" selected>Medium</option>
+            <option value="hard">Hard</option>
+            <option value="expert">Expert</option>
+            <option value="showcase">Showcase</option>
+          </select>
+        </div>
         <button id="vs-computer-btn" type="button">Play vs Computer</button>
       </div>
 
@@ -75,6 +86,27 @@
   </main>
   <script>
     (function () {
+      var DIFFICULTY_KEY = 'tris_difficulty';
+      var ALLOWED_DIFFICULTIES = ['trivial', 'easy', 'medium', 'hard', 'expert', 'showcase'];
+
+      var difficultySelect = document.getElementById('difficulty-select');
+
+      // AC-3: Restore difficulty from localStorage on page load
+      (function () {
+        var stored;
+        try { stored = localStorage.getItem(DIFFICULTY_KEY); } catch (e) { stored = null; }
+        var val = stored && ALLOWED_DIFFICULTIES.indexOf(stored) !== -1 ? stored : 'medium';
+        difficultySelect.value = val;
+        if (val !== stored) {
+          try { localStorage.setItem(DIFFICULTY_KEY, val); } catch (e) {}
+        }
+      })();
+
+      // AC-2: Persist difficulty to localStorage on change
+      difficultySelect.addEventListener('change', function () {
+        try { localStorage.setItem(DIFFICULTY_KEY, difficultySelect.value); } catch (e) {}
+      });
+
       var statusEl = document.getElementById('status');
       var userInfoEl = document.getElementById('user-info');
       var matchPanel = document.getElementById('match-panel');
@@ -118,11 +150,17 @@
 
       document.getElementById('vs-computer-btn').addEventListener('click', function () {
         statusEl.textContent = '';
-        fetch('/api/matches/' + currentMatchCode + '/vs-computer', { method: 'POST' }).then(function (r) {
+        var selectedDifficulty = difficultySelect.value;
+        fetch('/api/matches/' + currentMatchCode + '/vs-computer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ difficulty: selectedDifficulty }),
+        }).then(function (r) {
           return r.json().then(function (data) { return { ok: r.ok, data: data }; });
         }).then(function (res) {
           if (res.ok) {
-            window.location.href = '/game.html?code=' + currentMatchCode + '&role=X&mode=computer';
+            var diff = res.data.difficulty || selectedDifficulty;
+            window.location.href = '/game.html?code=' + currentMatchCode + '&role=X&mode=computer&difficulty=' + diff;
           } else {
             statusEl.textContent = res.data.error || 'Failed to start vs computer';
           }
