@@ -70,6 +70,9 @@ class JsonlScoreStore {
    * @returns {Promise<void>}
    */
   async award(usernameDisplay) {
+    if (usernameDisplay.toLowerCase() === '__bot__') {
+      throw { code: 'SENTINEL_REJECTED', name: usernameDisplay };
+    }
     const lower = usernameDisplay.toLowerCase();
     const cur = this._map.get(lower) || { usernameDisplay, pts: 0 };
     // Delegate increment to shared/game.js#awardWin
@@ -120,6 +123,9 @@ class InMemoryScoreStore {
    * @returns {Promise<void>}
    */
   async award(usernameDisplay) {
+    if (usernameDisplay.toLowerCase() === '__bot__') {
+      throw { code: 'SENTINEL_REJECTED', name: usernameDisplay };
+    }
     const lower = usernameDisplay.toLowerCase();
     const cur = this._map.get(lower) || { usernameDisplay, pts: 0 };
     const storeObj = { [usernameDisplay]: cur.pts };

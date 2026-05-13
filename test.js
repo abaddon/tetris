@@ -372,6 +372,78 @@ const _botTurnReady = (() => {
 }) : async () => { console.log('  [skip] bot-turn tests — story 03 not yet implemented'); })()
   .catch((err) => { console.error(err); process.exit(1); });
 
+// ---- Sentinel guard tests (sprint-05 story 04 AC-3/AC-4/AC-7) ----
+(async () => {
+  const os = require('os');
+  const path = require('path');
+  const fs = require('fs');
+  const { JsonlScoreStore, InMemoryScoreStore } = require('./server/score-store.js');
+
+  // JsonlScoreStore: award('__bot__') rejects with SENTINEL_REJECTED
+  {
+    const tmpFile = path.join(os.tmpdir(), `scores-test-${Date.now()}.jsonl`);
+    const store = new JsonlScoreStore(tmpFile);
+    store.boot();
+    let rejected = null;
+    try {
+      await store.award('__bot__');
+    } catch (e) {
+      rejected = e;
+    }
+    eq(rejected !== null, true, 'sentinel: JsonlScoreStore.award("__bot__") rejects');
+    eq(rejected && rejected.code, 'SENTINEL_REJECTED', 'sentinel: JsonlScoreStore rejection has code SENTINEL_REJECTED');
+    eq(rejected && rejected.name, '__bot__', 'sentinel: JsonlScoreStore rejection has name __bot__');
+    const diskContent = fs.existsSync(tmpFile) ? fs.readFileSync(tmpFile, 'utf8') : '';
+    eq(diskContent.trim(), '', 'sentinel: JsonlScoreStore writes nothing to disk for __bot__');
+    eq(store._map.has('__bot__'), false, 'sentinel: JsonlScoreStore adds nothing to in-memory map for __bot__');
+    try { fs.unlinkSync(tmpFile); } catch {}
+  }
+
+  // JsonlScoreStore: case-insensitive — award('__BOT__') also rejects
+  {
+    const tmpFile = path.join(os.tmpdir(), `scores-test-bot-upper-${Date.now()}.jsonl`);
+    const store = new JsonlScoreStore(tmpFile);
+    store.boot();
+    let rejected = null;
+    try {
+      await store.award('__BOT__');
+    } catch (e) {
+      rejected = e;
+    }
+    eq(rejected !== null, true, 'sentinel: JsonlScoreStore.award("__BOT__") rejects (case-insensitive)');
+    eq(rejected && rejected.code, 'SENTINEL_REJECTED', 'sentinel: JsonlScoreStore __BOT__ rejection code');
+    try { fs.unlinkSync(tmpFile); } catch {}
+  }
+
+  // InMemoryScoreStore: award('__bot__') rejects with SENTINEL_REJECTED
+  {
+    const store = new InMemoryScoreStore();
+    let rejected = null;
+    try {
+      await store.award('__bot__');
+    } catch (e) {
+      rejected = e;
+    }
+    eq(rejected !== null, true, 'sentinel: InMemoryScoreStore.award("__bot__") rejects');
+    eq(rejected && rejected.code, 'SENTINEL_REJECTED', 'sentinel: InMemoryScoreStore rejection has code SENTINEL_REJECTED');
+    eq(rejected && rejected.name, '__bot__', 'sentinel: InMemoryScoreStore rejection has name __bot__');
+    eq(store._map.has('__bot__'), false, 'sentinel: InMemoryScoreStore adds nothing to map for __bot__');
+  }
+
+  // InMemoryScoreStore: case-insensitive — award('__BOT__') also rejects
+  {
+    const store = new InMemoryScoreStore();
+    let rejected = null;
+    try {
+      await store.award('__BOT__');
+    } catch (e) {
+      rejected = e;
+    }
+    eq(rejected !== null, true, 'sentinel: InMemoryScoreStore.award("__BOT__") rejects (case-insensitive)');
+    eq(rejected && rejected.code, 'SENTINEL_REJECTED', 'sentinel: InMemoryScoreStore __BOT__ rejection code');
+  }
+})().catch((err) => { console.error(err); process.exit(1); });
+
 // ---- MatchHub win-scoring tests (AC-1 through AC-9, sprint-04 story 04) ----
 // Uses InMemoryScoreStore (no disk) and InMemoryMatchStore with mock WS objects.
 // Wrapped in an async IIFE so we can await the rejected-award microtask test (AC-5).

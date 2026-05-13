@@ -93,7 +93,9 @@ class MatchHub {
       match.status = 'ended';
       if (next.winner && this._scoreStore) {
         const winnerUsername = next.winner === 'X' ? match.playerX : match.playerO;
-        this._scoreStore.award(winnerUsername).catch((err) => console.error('[match-hub] score award failed', err));
+        if (winnerUsername !== BOT_SENTINEL) {
+          this._scoreStore.award(winnerUsername).catch((err) => console.error('[match-hub] score award failed', err));
+        }
       }
       this._broadcastState(match);
       this._broadcast(match.code, { type: 'match.ended', code: match.code, winner: next.winner, draw: next.draw });
@@ -110,8 +112,9 @@ class MatchHub {
           match.status = 'ended';
           if (afterBot.winner && this._scoreStore) {
             const winnerUsername = afterBot.winner === 'X' ? match.playerX : match.playerO;
-            // story 04 will add the BOT_SENTINEL skip guard before this call
-            this._scoreStore.award(winnerUsername).catch((err) => console.error('[match-hub] score award failed', err));
+            if (winnerUsername !== BOT_SENTINEL) {
+              this._scoreStore.award(winnerUsername).catch((err) => console.error('[match-hub] score award failed', err));
+            }
           }
           this._broadcastState(match);
           this._broadcast(match.code, { type: 'match.ended', code: match.code, winner: afterBot.winner, draw: afterBot.draw });
