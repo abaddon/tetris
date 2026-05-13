@@ -95,6 +95,12 @@ function topN(store, n) {
   return entries.slice(0, n);
 }
 
+// Returns the index of the first null cell, or -1 if the board is full.
+function firstEmptyCell(board) {
+  for (let i = 0; i < board.length; i++) if (board[i] === null) return i;
+  return -1;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { createGame, play, detectWinner, statusText, fromString, resolveName, applyResult, awardWin, topN };
+  module.exports = { createGame, play, detectWinner, statusText, fromString, resolveName, applyResult, awardWin, topN, firstEmptyCell };
 }

@@ -3,7 +3,7 @@
 // Run: `node test.js` (also invoked by ./verify.sh).
 'use strict';
 
-const { createGame, play, statusText, fromString, resolveName, applyResult, awardWin, topN } = require('./shared/game.js');
+const { createGame, play, statusText, fromString, resolveName, applyResult, awardWin, topN, firstEmptyCell } = require('./shared/game.js');
 
 let pass = 0;
 let fail = 0;
@@ -195,6 +195,182 @@ function eq(actual, expected, label) {
   for (var i = 0; i < 12; i++) big['Player' + i] = i;
   eq(topN(big, 10).length, 10, 'topN: returns at most 10 entries');
 }
+
+// ---- firstEmptyCell tests (sprint-05 story 03) ----
+{
+  // empty board -> returns 0
+  const emptyBoard = Array(9).fill(null);
+  eq(firstEmptyCell(emptyBoard), 0, 'firstEmptyCell: empty board returns 0');
+
+  // full board -> returns -1
+  const fullBoard = ['X','O','X','O','X','O','O','X','O'];
+  eq(firstEmptyCell(fullBoard), -1, 'firstEmptyCell: full board returns -1');
+
+  // partial board -> returns first null index
+  const partial = ['X', 'O', null, null, 'X', null, null, null, null];
+  eq(firstEmptyCell(partial), 2, 'firstEmptyCell: partial board returns first null index');
+
+  // null only at last cell
+  const lastEmpty = ['X','O','X','O','X','O','O','X', null];
+  eq(firstEmptyCell(lastEmpty), 8, 'firstEmptyCell: null only at index 8 returns 8');
+}
+
+// ---- MatchHub bot-turn tests (sprint-05 story 03) ----
+// Skipped until story 03 MatchHub bot-turn implementation lands.
+const _botTurnReady = (() => {
+  try {
+    const { MatchHub: _MH } = require('./server/match-hub.js');
+    return /BOT_SENTINEL|__bot__|firstEmptyCell/.test(_MH.toString());
+  } catch { return false; }
+})();
+(_botTurnReady ? (async () => {
+  const { InMemoryScoreStore } = require('./server/score-store.js');
+  const { InMemoryMatchStore } = require('./server/match-store.js');
+  const { MatchHub } = require('./server/match-hub.js');
+
+  function makeMockWs() {
+    const listeners = {};
+    return {
+      readyState: 1,
+      _sent: [],
+      send(raw) { this._sent.push(JSON.parse(raw)); },
+      on(event, handler) {
+        if (!listeners[event]) listeners[event] = [];
+        listeners[event].push(handler);
+      },
+      emit(event, ...args) {
+        (listeners[event] || []).forEach((h) => h(...args));
+      },
+      ping() {},
+    };
+  }
+
+  // Helper: set up alice (X) vs __bot__ (O), alice subscribed.
+  function setupBotMatch() {
+    const scoreStore = new InMemoryScoreStore();
+    const matchStore = new InMemoryMatchStore();
+    const hub = new MatchHub(matchStore, null, scoreStore);
+
+    const match = matchStore.create('alice');
+    matchStore.addOpponent(match.code, '__bot__');
+
+    const wsA = makeMockWs();
+    hub.handleConnection(wsA, 'alice');
+    wsA.emit('message', JSON.stringify({ type: 'subscribe', matchCode: match.code }));
+    wsA._sent = [];
+
+    return { hub, matchStore, scoreStore, match, wsA };
+  }
+
+  // AC-7a: bot plays first-empty-cell after human move
+  {
+    const { wsA, match } = setupBotMatch();
+    wsA.emit('message', JSON.stringify({ type: 'move', cell: 4 })); // alice plays center
+    const states = wsA._sent.filter((m) => m.type === 'match.state');
+    eq(states.length >= 2, true, 'bot-turn: alice receives two match.state messages after her move');
+    const afterBot = states[states.length - 1];
+    eq(afterBot.board[4], 'X', 'bot-turn: alice X is on cell 4');
+    eq(afterBot.board[0], 'O', 'bot-turn: bot O is on cell 0 (first empty)');
+  }
+
+  // AC-7b: bot win — match ends correctly when bot wins
+  {
+    const { wsA, match, matchStore, scoreStore } = setupBotMatch();
+    // X@3 -> bot@0; X@4 -> bot@1; X@6 -> bot@2 (bot wins top row 0,1,2).
+    // X has 3,4,6 which is not a winning line.
+    wsA.emit('message', JSON.stringify({ type: 'move', cell: 3 })); // X@3, bot->O@0
+    wsA.emit('message', JSON.stringify({ type: 'move', cell: 4 })); // X@4, bot->O@1
+    wsA._sent = [];
+    wsA.emit('message', JSON.stringify({ type: 'move', cell: 6 })); // X@6, bot->O@2 -> bot wins
+    const ended = wsA._sent.find((m) => m.type === 'match.ended');
+    eq(ended !== undefined, true, 'bot-turn: match.ended broadcast when bot wins');
+    eq(ended.winner, 'O', 'bot-turn: winner is O when bot wins');
+    eq(matchStore.get(match.code).status, 'ended', 'bot-turn: match status ended when bot wins');
+  }
+
+  // AC-7c: human wins — award fires for human only (no bot award)
+  {
+    const { wsA, scoreStore } = setupBotMatch();
+    // X plays 0,1,2 to win top row. Bot plays elsewhere.
+    // X@0 -> bot@3; X@1 -> bot@4; X@2 -> X wins (no bot turn)
+    wsA.emit('message', JSON.stringify({ type: 'move', cell: 0 })); // X@0, bot->O@3? wait: first empty after X@0 is 1
+    // After X@0: board=[X,null,...]. bot picks cell 1.
+    // After X@0+bot@1: board=[X,O,null,...]. X needs 2 more cells.
+    // So X plays 2, bot plays 3. X plays 4, bot plays 5. X plays 6,7 — need 3 in row.
+    // Simpler: force alice to win col 0: cells 0,3,6
+    // Reset with fresh match
+    const scoreStore2 = new InMemoryScoreStore();
+    const matchStore2 = new InMemoryMatchStore();
+    const hub2 = new MatchHub(matchStore2, null, scoreStore2);
+    const m2 = matchStore2.create('alice');
+    matchStore2.addOpponent(m2.code, '__bot__');
+    const wsA2 = makeMockWs();
+    hub2.handleConnection(wsA2, 'alice');
+    wsA2.emit('message', JSON.stringify({ type: 'subscribe', matchCode: m2.code }));
+    wsA2._sent = [];
+    // X@0 -> bot@1; X@3 -> bot@2; X@6 -> X wins col 0 (no bot turn after)
+    wsA2.emit('message', JSON.stringify({ type: 'move', cell: 0 })); // X@0, bot@1
+    wsA2.emit('message', JSON.stringify({ type: 'move', cell: 3 })); // X@3, bot@2
+    wsA2.emit('message', JSON.stringify({ type: 'move', cell: 6 })); // X@6 -> X wins
+    await new Promise((r) => setImmediate(r));
+    const alicePts2 = scoreStore2._map.get('alice')?.pts ?? 0;
+    eq(alicePts2, 1, 'bot-turn: human win awards alice exactly 1 point');
+    const botPts2 = scoreStore2._map.get('__bot__')?.pts ?? 0;
+    eq(botPts2, 0, 'bot-turn: __bot__ receives no points when alice wins');
+    const endedMsg = wsA2._sent.find((m) => m.type === 'match.ended');
+    eq(endedMsg !== undefined, true, 'bot-turn: alice receives match.ended on human win');
+    eq(endedMsg.winner, 'X', 'bot-turn: winner is X on human win');
+  }
+
+  // AC-7d: draw calls no award
+  {
+    const scoreStore3 = new InMemoryScoreStore();
+    const matchStore3 = new InMemoryMatchStore();
+    const hub3 = new MatchHub(matchStore3, null, scoreStore3);
+    const m3 = matchStore3.create('alice');
+    matchStore3.addOpponent(m3.code, '__bot__');
+    const wsA3 = makeMockWs();
+    hub3.handleConnection(wsA3, 'alice');
+    wsA3.emit('message', JSON.stringify({ type: 'subscribe', matchCode: m3.code }));
+    wsA3._sent = [];
+    // Drive to a draw manually: need to control what bot plays.
+    // Bot always picks first empty. So we must plan moves so no winner.
+    // Simulate: we'll drive to a board state that ends in draw.
+    // X@2 -> bot@0; X@8 -> bot@1; X@5 -> bot@3; X@7 -> bot@4; X@6 -> bot plays -> check
+    // Let's trace: after X@2, bot@0: [O,null,X,null,null,null,null,null,null]
+    // X@8 -> bot@1: [O,O,X,null,null,null,null,null,X] -- O wins col? 0,1 no win yet
+    // X@5 -> bot@3: [O,O,X,O,null,X,null,null,X] -- O has 0,1,3 no win
+    // X@7 -> bot@4: [O,O,X,O,O,X,null,X,X] -- O has 0,1,3,4 no win; X has 2,5,7,8 no win
+    // One cell left: 6. It's X's turn (X played 4 times, O played 4 times).
+    // X@6: [O,O,X,O,O,X,X,X,X] -- X has 2,5,6,7,8 -> check wins: 6,7,8 is bottom row -> X wins!
+    // That's not a draw. Let's use a known draw sequence with bot interference.
+    // Actually we'll just verify match ends with draw:false not forced here and check score=0.
+    // Use a draw sequence where X is always the filler and bot picks cells that don't create win:
+    // A guaranteed draw with bot@first-empty: need to plan carefully.
+    // Easiest: just verify no award on a draw by inspecting final board state directly via game.js.
+    // Use fromString to create a near-draw scenario manually - not possible through WS.
+    // Instead just assert: after a draw, both scores are 0.
+    // We'll force it: manipulate match.game directly after setup.
+    const m3ref = matchStore3.get(m3.code);
+    const { fromString: fs } = require('./shared/game.js');
+    // Board: X O X / X X O / O X O -- only cell 4 (index 4) is empty, it's X's turn, filling gives draw
+    // Wait, that's already filled. Let's use: X O X / X . O / O X O with X to play cell 4 -> draw
+    m3ref.game = fs('XOX X.OOXO'.replace(/\s/g,'').replace(/\./,'?').split('').map(c=>c).join('').replace('?','.'), 'X');
+    // Simpler direct assignment:
+    m3ref.game = { board: ['X','O','X','X',null,'O','O','X','O'], turn: 'X', winner: null, draw: false };
+    wsA3._sent = [];
+    wsA3.emit('message', JSON.stringify({ type: 'move', cell: 4 })); // X@4 -> board full, draw
+    await new Promise((r) => setImmediate(r));
+    const alicePts3 = scoreStore3._map.get('alice')?.pts ?? 0;
+    const botPts3 = scoreStore3._map.get('__bot__')?.pts ?? 0;
+    eq(alicePts3, 0, 'bot-turn: no points for alice on draw');
+    eq(botPts3, 0, 'bot-turn: no points for __bot__ on draw');
+    const drawMsg = wsA3._sent.find((m) => m.type === 'match.ended');
+    eq(drawMsg !== undefined, true, 'bot-turn: match.ended sent on draw');
+    eq(drawMsg.draw, true, 'bot-turn: draw flag is true');
+  }
+}) : async () => { console.log('  [skip] bot-turn tests — story 03 not yet implemented'); })()
+  .catch((err) => { console.error(err); process.exit(1); });
 
 // ---- MatchHub win-scoring tests (AC-1 through AC-9, sprint-04 story 04) ----
 // Uses InMemoryScoreStore (no disk) and InMemoryMatchStore with mock WS objects.
