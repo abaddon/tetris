@@ -48,6 +48,7 @@ class JsonlScoreStore {
       try {
         const record = JSON.parse(trimmed);
         if (!record.usernameLower || !record.usernameDisplay) continue;
+        if (record.usernameLower.toLowerCase() === '__bot__') continue;
         const cur = this._map.get(record.usernameLower) || { usernameDisplay: record.usernameDisplay, pts: 0 };
         // Delegate arithmetic to shared/game.js#awardWin
         const storeObj = { [record.usernameDisplay]: cur.pts };
@@ -101,7 +102,8 @@ class JsonlScoreStore {
   async topN(n = 10) {
     // Build a plain object store { [usernameDisplay]: pts } for topN
     const storeObj = {};
-    for (const { usernameDisplay, pts } of this._map.values()) {
+    for (const [key, { usernameDisplay, pts }] of this._map.entries()) {
+      if (key.toLowerCase() === '__bot__') continue;
       storeObj[usernameDisplay] = pts;
     }
     return topN(storeObj, n);
@@ -141,7 +143,8 @@ class InMemoryScoreStore {
    */
   async topN(n = 10) {
     const storeObj = {};
-    for (const { usernameDisplay, pts } of this._map.values()) {
+    for (const [key, { usernameDisplay, pts }] of this._map.entries()) {
+      if (key.toLowerCase() === '__bot__') continue;
       storeObj[usernameDisplay] = pts;
     }
     return topN(storeObj, n);

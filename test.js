@@ -444,6 +444,70 @@ const _botTurnReady = (() => {
   }
 })().catch((err) => { console.error(err); process.exit(1); });
 
+// ---- Sentinel leaderboard-exclusion tests (sprint-05 story 05 AC-2/AC-3) ----
+(async () => {
+  const os = require('os');
+  const path = require('path');
+  const fs = require('fs');
+  const { JsonlScoreStore, InMemoryScoreStore } = require('./server/score-store.js');
+
+  // AC-2: JsonlScoreStore.boot() with a sentinel line on disk — __bot__ never enters _map
+  {
+    const tmpFile = path.join(os.tmpdir(), `scores-boot-bot-${Date.now()}.jsonl`);
+    const botLine = JSON.stringify({ usernameLower: '__bot__', usernameDisplay: '__bot__', delta: 1, at: Date.now() });
+    const humanLine = JSON.stringify({ usernameLower: 'alice', usernameDisplay: 'alice', delta: 1, at: Date.now() });
+    fs.writeFileSync(tmpFile, botLine + '\n' + humanLine + '\n');
+    const store = new JsonlScoreStore(tmpFile);
+    store.boot();
+    eq(store._map.has('__bot__'), false, 'sentinel-boot: __bot__ line on disk is skipped during boot replay');
+    eq(store._map.has('alice'), true, 'sentinel-boot: legitimate user alice is loaded from disk');
+    try { fs.unlinkSync(tmpFile); } catch {}
+  }
+
+  // AC-2: case variants (__BOT__, __Bot__) are also skipped on boot
+  {
+    const tmpFile = path.join(os.tmpdir(), `scores-boot-bot-cases-${Date.now()}.jsonl`);
+    const lines = [
+      JSON.stringify({ usernameLower: '__BOT__', usernameDisplay: '__BOT__', delta: 1, at: Date.now() }),
+      JSON.stringify({ usernameLower: '__Bot__', usernameDisplay: '__Bot__', delta: 1, at: Date.now() }),
+    ].join('\n') + '\n';
+    fs.writeFileSync(tmpFile, lines);
+    const store = new JsonlScoreStore(tmpFile);
+    store.boot();
+    const hasBotVariant = [...store._map.keys()].some(k => k.toLowerCase() === '__bot__');
+    eq(hasBotVariant, false, 'sentinel-boot: case variants __BOT__ and __Bot__ are also skipped on boot');
+    try { fs.unlinkSync(tmpFile); } catch {}
+  }
+
+  // AC-3: JsonlScoreStore.topN() filters a manually-seeded sentinel in _map
+  {
+    const tmpFile = path.join(os.tmpdir(), `scores-topn-bot-${Date.now()}.jsonl`);
+    const store = new JsonlScoreStore(tmpFile);
+    store.boot();
+    // Manually seed the sentinel into _map (simulates a hypothetical future code path)
+    store._map.set('__bot__', { usernameDisplay: '__bot__', pts: 99 });
+    store._map.set('alice', { usernameDisplay: 'alice', pts: 3 });
+    const results = await store.topN(10);
+    const hasBotInResults = results.some(e => e.name.toLowerCase() === '__bot__');
+    eq(hasBotInResults, false, 'sentinel-topN: JsonlScoreStore.topN filters manually-seeded __bot__ from results');
+    const aliceInResults = results.some(e => e.name === 'alice');
+    eq(aliceInResults, true, 'sentinel-topN: JsonlScoreStore.topN still returns legitimate users');
+    try { fs.unlinkSync(tmpFile); } catch {}
+  }
+
+  // AC-3: InMemoryScoreStore.topN() filters a manually-seeded sentinel in _map
+  {
+    const store = new InMemoryScoreStore();
+    store._map.set('__bot__', { usernameDisplay: '__bot__', pts: 99 });
+    store._map.set('bob', { usernameDisplay: 'bob', pts: 5 });
+    const results = await store.topN(10);
+    const hasBotInResults = results.some(e => e.name.toLowerCase() === '__bot__');
+    eq(hasBotInResults, false, 'sentinel-topN: InMemoryScoreStore.topN filters manually-seeded __bot__ from results');
+    const bobInResults = results.some(e => e.name === 'bob');
+    eq(bobInResults, true, 'sentinel-topN: InMemoryScoreStore.topN still returns legitimate users');
+  }
+})().catch((err) => { console.error(err); process.exit(1); });
+
 // ---- MatchHub win-scoring tests (AC-1 through AC-9, sprint-04 story 04) ----
 // Uses InMemoryScoreStore (no disk) and InMemoryMatchStore with mock WS objects.
 // Wrapped in an async IIFE so we can await the rejected-award microtask test (AC-5).

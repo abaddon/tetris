@@ -57,6 +57,7 @@
       var params = new URLSearchParams(location.search);
       var matchCode = params.get('code') || '';
       var myRole = params.get('role') || '';
+      var mode = params.get('mode') || '';
 
       var statusEl = document.getElementById('status');
       var boardEl = document.getElementById('board');
@@ -181,20 +182,20 @@
         }
 
         var xName = msg.playerX || 'Player X';
-        var oName = msg.playerO || 'Waiting…';
+        var oName = msg.playerO === '__bot__' ? 'Computer' : (msg.playerO || 'Waiting…');
 
-        if (msg.status === 'waiting' || !msg.playerO) {
+        if ((msg.status === 'waiting' || !msg.playerO) && mode !== 'computer') {
           statusEl.textContent = 'Waiting for opponent to join…';
           disableBoard();
         } else if (msg.winner) {
           var winnerName = msg.winner === 'X' ? xName : oName;
           statusEl.textContent = winnerName + ' wins!';
           recordWin(winnerName);
-          rematchBtn.style.display = '';
+          if (mode !== 'computer') rematchBtn.style.display = '';
           disableBoard();
         } else if (msg.draw) {
           statusEl.textContent = 'Draw!';
-          rematchBtn.style.display = '';
+          if (mode !== 'computer') rematchBtn.style.display = '';
           disableBoard();
         } else {
           var turnName = msg.turn === 'X' ? xName : oName;

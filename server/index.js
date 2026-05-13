@@ -111,7 +111,8 @@ router.on('GET', '/api/leaderboard', async (req, res) => {
   if (!username) { send(res, 401, { error: 'Not authenticated' }); return; }
   const entries = await scoreStore.topN(10);
   // Port returns { name, pts }; public API schema uses { username, pts }
-  send(res, 200, entries.map(({ name, pts }) => ({ username: name, pts })));
+  const mapped = entries.map(({ name, pts }) => ({ username: name, pts }));
+  send(res, 200, mapped.filter(e => e.username.toLowerCase() !== '__bot__'));
 });
 
 router.on('POST', '/api/matches', (req, res) => {
