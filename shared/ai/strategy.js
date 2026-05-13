@@ -72,8 +72,12 @@ function createRegistry() {
   };
 }
 
-// Default registry — pre-populated with trivial only.
-// Wave-3b stories will call registry.register() to add more strategies.
+// Default registry — pre-populated with all strategies (ADR-0009 wave-3b).
 const defaultRegistry = createRegistry();
+defaultRegistry.register('easy',     require('./strategies/random.js'));
+defaultRegistry.register('medium',   require('./strategies/heuristic.js'));
+defaultRegistry.register('hard',     require('./strategies/minimax.js'));
+defaultRegistry.register('expert',   require('./strategies/minimax-ab.js'));
+defaultRegistry.register('showcase', require('./strategies/mcts.js'));
 
 module.exports = { BotStrategy: undefined, DIFFICULTIES, createRegistry, defaultRegistry };
