@@ -429,6 +429,255 @@ async function run() {
 
   wsA.close();
 
+  // ---- Sprint-04 Story 03: GET /api/leaderboard ----
+
+  // Re-login alice to get a fresh session for leaderboard tests
+  const aliceLb = `aliceLb_${Date.now()}`;
+  let lbCookie = '';
+  {
+    await req('POST', '/api/register', { username: aliceLb, password: p });
+    const r = await req('POST', '/api/login', { username: aliceLb, password: p });
+    assert(r.status === 200, `sprint04-s03: aliceLb login 200 (got ${r.status})`);
+    lbCookie = (r.headers['set-cookie']?.[0] || '').split(';')[0];
+  }
+
+  // Authenticated GET returns 200 + array
+  {
+    const r = await req('GET', '/api/leaderboard', null, { Cookie: lbCookie });
+    assert(r.status === 200, `sprint04-s03: GET /api/leaderboard 200 (got ${r.status})`);
+    assert(Array.isArray(r.data), 'sprint04-s03: leaderboard response is array');
+  }
+
+  // Each object has { username, pts } shape
+  {
+    const r = await req('GET', '/api/leaderboard', null, { Cookie: lbCookie });
+    const valid = Array.isArray(r.data) && r.data.every(
+      (e) => typeof e.username === 'string' && typeof e.pts === 'number'
+    );
+    assert(valid, 'sprint04-s03: every leaderboard entry has { username: string, pts: number }');
+  }
+
+  // Unauthenticated GET returns 401
+  {
+    const r = await req('GET', '/api/leaderboard', null);
+    assert(r.status === 401, `sprint04-s03: GET /api/leaderboard 401 without session (got ${r.status})`);
+  }
+
+  // Result is capped at 10 even when many players exist (we seed >=10 users from previous stories,
+  // but they have 0 pts so we just verify the array length <= 10 invariant)
+  {
+    const r = await req('GET', '/api/leaderboard', null, { Cookie: lbCookie });
+    assert(Array.isArray(r.data) && r.data.length <= 10, `sprint04-s03: leaderboard capped at 10 (got ${r.data?.length})`);
+  }
+
+  // ---- Sprint-04 Story 04: Win awards a leaderboard point ----
+
+  const winnerX = `winnerX_${Date.now()}`;
+  const loserO = `loserO_${Date.now()}`;
+  let winnerCookie = '';
+  {
+    await req('POST', '/api/register', { username: winnerX, password: p });
+    await req('POST', '/api/register', { username: loserO, password: p });
+    const rW = await req('POST', '/api/login', { username: winnerX, password: p });
+    const rL = await req('POST', '/api/login', { username: loserO, password: p });
+    assert(rW.status === 200, `sprint04-s04: winnerX login 200 (got ${rW.status})`);
+    assert(rL.status === 200, `sprint04-s04: loserO login 200 (got ${rL.status})`);
+    winnerCookie = (rW.headers['set-cookie']?.[0] || '').split(';')[0];
+    const loserCookie = (rL.headers['set-cookie']?.[0] || '').split(';')[0];
+
+    // winner creates match (X), loser joins (O)
+    const rMatch = await req('POST', '/api/matches', null, { Cookie: winnerCookie });
+    assert(rMatch.status === 201, `sprint04-s04: winnerX creates match (got ${rMatch.status})`);
+    const matchCode = rMatch.data.code;
+
+    const rJoin = await req('POST', `/api/matches/${matchCode}/join`, null, { Cookie: loserCookie });
+    assert(rJoin.status === 200, `sprint04-s04: loserO joins match (got ${rJoin.status})`);
+
+    // open websockets for both players
+    const wsW = await openWs(winnerCookie);
+    const wsL = await openWs(loserCookie);
+    const qW = makeQueue(wsW);
+    const qL = makeQueue(wsL);
+
+    // both subscribe
+    wsW.send(JSON.stringify({ type: 'subscribe', matchCode }));
+    const initW = await qW.next('winnerX initial state');
+    assert(initW.type === 'match.state', 'sprint04-s04: winnerX gets match.state on subscribe');
+
+    wsL.send(JSON.stringify({ type: 'subscribe', matchCode }));
+    // drain both queues for the join-triggered state update
+    await qW.next('winnerX state after loserO subscribes');
+    const initL = await qL.next('loserO initial state');
+    assert(initL.type === 'match.state', 'sprint04-s04: loserO gets match.state on subscribe');
+    assert(initL.status === 'active', 'sprint04-s04: match is active');
+
+    // play to a top-row win: X takes 0,1,2; O takes 3,4
+    // move 1: X plays cell 0
+    wsW.send(JSON.stringify({ type: 'move', matchCode, cell: 0 }));
+    await qW.next('winnerX state after cell 0');
+    await qL.next('loserO state after cell 0');
+
+    // move 2: O plays cell 3
+    wsL.send(JSON.stringify({ type: 'move', matchCode, cell: 3 }));
+    await qW.next('winnerX state after cell 3');
+    await qL.next('loserO state after cell 3');
+
+    // move 3: X plays cell 1
+    wsW.send(JSON.stringify({ type: 'move', matchCode, cell: 1 }));
+    await qW.next('winnerX state after cell 1');
+    await qL.next('loserO state after cell 1');
+
+    // move 4: O plays cell 4
+    wsL.send(JSON.stringify({ type: 'move', matchCode, cell: 4 }));
+    await qW.next('winnerX state after cell 4');
+    await qL.next('loserO state after cell 4');
+
+    // move 5: X plays cell 2 — top-row win (0,1,2)
+    wsW.send(JSON.stringify({ type: 'move', matchCode, cell: 2 }));
+    // each player receives match.state then match.ended
+    const winStateW = await qW.next('winnerX final state');
+    const winEndedW = await qW.next('winnerX match.ended');
+    const winStateL = await qL.next('loserO final state');
+    const winEndedL = await qL.next('loserO match.ended');
+
+    assert(winStateW.type === 'match.state', 'sprint04-s04: winnerX gets final match.state');
+    assert(winEndedW.type === 'match.ended', `sprint04-s04: winnerX gets match.ended (got ${winEndedW.type})`);
+    assert(winEndedW.winner === 'X', `sprint04-s04: match.ended winner is 'X' (got ${winEndedW.winner})`);
+    assert(winStateL.type === 'match.state', 'sprint04-s04: loserO gets final match.state');
+    assert(winEndedL.type === 'match.ended', `sprint04-s04: loserO gets match.ended (got ${winEndedL.type})`);
+
+    wsW.close();
+    wsL.close();
+  }
+
+  // Play two more games so winner accumulates enough pts to appear in topN despite accumulated history
+  for (let extra = 0; extra < 2; extra++) {
+    const loserExtra = `loserExtra${extra}_${Date.now()}`;
+    await req('POST', '/api/register', { username: loserExtra, password: p });
+    const rLE = await req('POST', '/api/login', { username: loserExtra, password: p });
+    const leCookie = (rLE.headers['set-cookie']?.[0] || '').split(';')[0];
+    const rEM = await req('POST', '/api/matches', null, { Cookie: winnerCookie });
+    const extraCode = rEM.data.code;
+    await req('POST', `/api/matches/${extraCode}/join`, null, { Cookie: leCookie });
+    const wsEW = await openWs(winnerCookie);
+    const wsEL = await openWs(leCookie);
+    const qEW = makeQueue(wsEW);
+    const qEL = makeQueue(wsEL);
+    wsEW.send(JSON.stringify({ type: 'subscribe', matchCode: extraCode }));
+    await qEW.next('extra winnerX initial');
+    wsEL.send(JSON.stringify({ type: 'subscribe', matchCode: extraCode }));
+    await qEW.next('extra winnerX state after loser subscribes');
+    await qEL.next('extra loser initial');
+    wsEW.send(JSON.stringify({ type: 'move', matchCode: extraCode, cell: 0 }));
+    await qEW.next('extra move 0 W'); await qEL.next('extra move 0 L');
+    wsEL.send(JSON.stringify({ type: 'move', matchCode: extraCode, cell: 3 }));
+    await qEW.next('extra move 3 W'); await qEL.next('extra move 3 L');
+    wsEW.send(JSON.stringify({ type: 'move', matchCode: extraCode, cell: 1 }));
+    await qEW.next('extra move 1 W'); await qEL.next('extra move 1 L');
+    wsEL.send(JSON.stringify({ type: 'move', matchCode: extraCode, cell: 4 }));
+    await qEW.next('extra move 4 W'); await qEL.next('extra move 4 L');
+    wsEW.send(JSON.stringify({ type: 'move', matchCode: extraCode, cell: 2 }));
+    await qEW.next('extra final state W'); await qEW.next('extra ended W');
+    await qEL.next('extra final state L'); await qEL.next('extra ended L');
+    wsEW.close(); wsEL.close();
+  }
+
+  // GET /api/leaderboard with winner's cookie — must include winner with pts >= 1
+  {
+    const r = await req('GET', '/api/leaderboard', null, { Cookie: winnerCookie });
+    assert(r.status === 200, `sprint04-s04: GET /api/leaderboard 200 after win (got ${r.status})`);
+    const entry = Array.isArray(r.data) && r.data.find((e) => e.username === winnerX);
+    assert(!!entry, `sprint04-s04: leaderboard contains winner ${winnerX}`);
+    assert(entry && entry.pts >= 1, `sprint04-s04: winner has pts >= 1 (got ${entry ? entry.pts : 'none'})`);
+  }
+
+  // ---- Sprint-05 Story 02: POST /api/matches/:code/vs-computer ----
+
+  const alice02 = `alice02_${Date.now()}`;
+  let a02Cookie = '';
+  {
+    await req('POST', '/api/register', { username: alice02, password: p });
+    const r = await req('POST', '/api/login', { username: alice02, password: p });
+    assert(r.status === 200, `sprint05-s02: alice02 login 200 (got ${r.status})`);
+    a02Cookie = (r.headers['set-cookie']?.[0] || '').split(';')[0];
+  }
+
+  // alice creates a match
+  let vsCode = '';
+  {
+    const r = await req('POST', '/api/matches', null, { Cookie: a02Cookie });
+    assert(r.status === 201, `sprint05-s02: alice02 creates match 201 (got ${r.status})`);
+    vsCode = r.data.code;
+  }
+
+  // happy path: owner calls vs-computer -> 200 with mode:'computer'
+  {
+    const r = await req('POST', `/api/matches/${vsCode}/vs-computer`, null, { Cookie: a02Cookie });
+    assert(r.status === 200, `sprint05-s02: vs-computer 200 (got ${r.status})`);
+    assert(r.data.code === vsCode, `sprint05-s02: response echoes code`);
+    assert(r.data.role === 'X', `sprint05-s02: role is X`);
+    assert(r.data.mode === 'computer', `sprint05-s02: mode is computer`);
+  }
+
+  // second call -> 409 Match already started
+  {
+    const r = await req('POST', `/api/matches/${vsCode}/vs-computer`, null, { Cookie: a02Cookie });
+    assert(r.status === 409, `sprint05-s02: second vs-computer 409 (got ${r.status})`);
+    assert(r.data.error === 'Match already started', `sprint05-s02: 409 error message`);
+  }
+
+  // non-owner gets 403
+  {
+    const bob02 = `bob02_${Date.now()}`;
+    await req('POST', '/api/register', { username: bob02, password: p });
+    const rB = await req('POST', '/api/login', { username: bob02, password: p });
+    const b02Cookie = (rB.headers['set-cookie']?.[0] || '').split(';')[0];
+    // alice creates a fresh waiting match
+    const rM = await req('POST', '/api/matches', null, { Cookie: a02Cookie });
+    const freshCode = rM.data.code;
+    const r = await req('POST', `/api/matches/${freshCode}/vs-computer`, null, { Cookie: b02Cookie });
+    assert(r.status === 403, `sprint05-s02: non-owner 403 (got ${r.status})`);
+  }
+
+  // unauthenticated -> 401
+  {
+    const r = await req('POST', `/api/matches/${vsCode}/vs-computer`, null);
+    assert(r.status === 401, `sprint05-s02: unauthenticated 401 (got ${r.status})`);
+  }
+
+  // missing match code -> 404
+  {
+    const r = await req('POST', '/api/matches/ZZZZZ/vs-computer', null, { Cookie: a02Cookie });
+    assert(r.status === 404, `sprint05-s02: unknown code 404 (got ${r.status})`);
+  }
+
+  // reserved username __bot__ is rejected at register
+  {
+    const r = await req('POST', '/api/register', { username: '__bot__', password: p });
+    assert(r.status === 400, `sprint05-s02: __bot__ registration rejected 400 (got ${r.status})`);
+    assert(r.data.error === 'Reserved name', `sprint05-s02: reserved name error message`);
+  }
+
+  // ---- Sprint-05 Story 05: Sentinel exclusion from GET /api/leaderboard ----
+
+  const aliceLb05 = `aliceLb05_${Date.now()}`;
+  let lbCookie05 = '';
+  {
+    await req('POST', '/api/register', { username: aliceLb05, password: p });
+    const r = await req('POST', '/api/login', { username: aliceLb05, password: p });
+    assert(r.status === 200, `sprint05-s05: aliceLb05 login 200 (got ${r.status})`);
+    lbCookie05 = (r.headers['set-cookie']?.[0] || '').split(';')[0];
+  }
+
+  // GET /api/leaderboard must never contain __bot__ (or any case variant)
+  {
+    const r = await req('GET', '/api/leaderboard', null, { Cookie: lbCookie05 });
+    assert(r.status === 200, `sprint05-s05: GET /api/leaderboard 200 (got ${r.status})`);
+    assert(Array.isArray(r.data), 'sprint05-s05: leaderboard response is array');
+    const noBotEntry = Array.isArray(r.data) && r.data.every(e => e.username.toLowerCase() !== '__bot__');
+    assert(noBotEntry, 'sprint05-s05: no __bot__ entry in GET /api/leaderboard response');
+  }
+
   // ---- results ----
   console.log(`\nIntegration: ${pass} passed, ${fail} failed`);
   if (fail > 0) {

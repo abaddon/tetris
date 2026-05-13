@@ -5,10 +5,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { WebSocketServer } = require('ws');
 
+const BOT_SENTINEL = '__bot__';
+
 const { Router } = require('./router.js');
 const { readBody, send, parseCookies, setCookieHeader } = require('./http-helpers.js');
 const { ScryptHasher, MemorySessionStore } = require('./auth.js');
 const { JsonlUserStore } = require('./user-store.js');
+const { JsonlScoreStore } = require('./score-store.js');
 const { InMemoryMatchStore } = require('./match-store.js');
 const { MatchHub } = require('./match-hub.js');
 
@@ -21,9 +24,11 @@ fs.copyFileSync(sharedGame, publicGame);
 const dataDir = path.join(__dirname, '../data');
 const userStore = new JsonlUserStore(path.join(dataDir, 'users.jsonl'));
 userStore.boot();
+const scoreStore = new JsonlScoreStore(path.join(dataDir, 'scores.jsonl'));
+scoreStore.boot();
 const sessionStore = new MemorySessionStore();
 const matchStore = new InMemoryMatchStore();
-const matchHub = new MatchHub(matchStore, sessionStore);
+const matchHub = new MatchHub(matchStore, sessionStore, scoreStore);
 
 // ---- static file serving ----
 const PUBLIC_DIR = path.join(__dirname, '../public');
@@ -101,6 +106,15 @@ router.on('GET', '/api/me', (req, res) => {
   send(res, 200, { username });
 });
 
+router.on('GET', '/api/leaderboard', async (req, res) => {
+  const username = getSession(req);
+  if (!username) { send(res, 401, { error: 'Not authenticated' }); return; }
+  const entries = await scoreStore.topN(10);
+  // Port returns { name, pts }; public API schema uses { username, pts }
+  const mapped = entries.map(({ name, pts }) => ({ username: name, pts }));
+  send(res, 200, mapped.filter(e => e.username.toLowerCase() !== '__bot__'));
+});
+
 router.on('POST', '/api/matches', (req, res) => {
   const username = getSession(req);
   if (!username) { send(res, 401, { error: 'Not authenticated' }); return; }
@@ -125,6 +139,17 @@ router.on('POST', '/api/matches/:code/join', (req, res, params) => {
     if (err.code === 'SELF_JOIN') { send(res, 409, { error: 'You cannot join your own match' }); return; }
     send(res, 500, { error: 'Internal error' });
   }
+});
+
+router.on('POST', '/api/matches/:code/vs-computer', (req, res, params) => {
+  const username = getSession(req);
+  if (!username) { send(res, 401, { error: 'Not authenticated' }); return; }
+  const match = matchStore.get(params.code);
+  if (!match) { send(res, 404, { error: 'Match not found' }); return; }
+  if (match.playerX !== username) { send(res, 403, { error: 'Forbidden' }); return; }
+  if (match.status !== 'waiting') { send(res, 409, { error: 'Match already started' }); return; }
+  matchStore.addOpponent(params.code, BOT_SENTINEL);
+  send(res, 200, { code: match.code, role: 'X', mode: 'computer' });
 });
 
 // ---- HTTP + WS server ----
@@ -156,4 +181,4 @@ server.listen(PORT, () => {
   console.log(`listening on :${addr.port}`);
 });
 
-module.exports = { server, userStore, sessionStore, matchStore, matchHub };
+module.exports = { server, userStore, sessionStore, matchStore, matchHub, scoreStore, BOT_SENTINEL };

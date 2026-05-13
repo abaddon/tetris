@@ -5,6 +5,7 @@ const path = require('node:path');
 const { ScryptHasher } = require('./auth.js');
 
 const USERNAME_RE = /^[A-Za-z0-9_]+$/;
+const BOT_SENTINEL = '__bot__';
 
 class JsonlUserStore {
   constructor(filePath) {
@@ -40,6 +41,9 @@ class JsonlUserStore {
     if (!username || !username.trim()) {
       throw { code: 'VALIDATION', field: 'username', message: 'Username is required' };
     }
+    if (username.toLowerCase() === BOT_SENTINEL) {
+      throw { code: 'VALIDATION', field: 'username', message: 'Reserved name' };
+    }
     if (!USERNAME_RE.test(username)) {
       throw { code: 'VALIDATION', field: 'username', message: 'Username may only contain letters, digits, and underscores' };
     }
@@ -71,6 +75,9 @@ class InMemoryUserStore {
   async create({ username, password }) {
     if (!username || !username.trim()) {
       throw { code: 'VALIDATION', field: 'username', message: 'Username is required' };
+    }
+    if (username.toLowerCase() === BOT_SENTINEL) {
+      throw { code: 'VALIDATION', field: 'username', message: 'Reserved name' };
     }
     if (!USERNAME_RE.test(username)) {
       throw { code: 'VALIDATION', field: 'username', message: 'Username may only contain letters, digits, and underscores' };

@@ -1,14 +1,16 @@
 'use strict';
 
-const { play } = require('../shared/game.js');
+const { play, firstEmptyCell } = require('../shared/game.js');
 
 const PING_INTERVAL_MS = 30_000;
+const BOT_SENTINEL = '__bot__';
 const PONG_TIMEOUT_MS = 60_000;
 
 class MatchHub {
-  constructor(matchStore, sessionStore) {
+  constructor(matchStore, sessionStore, scoreStore) {
     this._matchStore = matchStore;
     this._sessionStore = sessionStore;
+    this._scoreStore = scoreStore || null;
     // matchCode -> Set<ws> (both players)
     this._rooms = new Map();
     // ws -> { username, matchCode, lastPong }
@@ -89,16 +91,44 @@ class MatchHub {
 
     if (next.winner || next.draw) {
       match.status = 'ended';
+      if (next.winner && this._scoreStore) {
+        const winnerUsername = next.winner === 'X' ? match.playerX : match.playerO;
+        if (winnerUsername !== BOT_SENTINEL) {
+          this._scoreStore.award(winnerUsername).catch((err) => console.error('[match-hub] score award failed', err));
+        }
+      }
       this._broadcastState(match);
       this._broadcast(match.code, { type: 'match.ended', code: match.code, winner: next.winner, draw: next.draw });
     } else {
       this._broadcastState(match);
+
+      if (match.status === 'active' && !next.winner && !next.draw && match.playerO === BOT_SENTINEL && next.turn === 'O') {
+        const botCell = firstEmptyCell(next.board);
+        if (botCell === -1) { console.error('[match-hub] bot has no legal move'); return; }
+        const afterBot = play(next, botCell);
+        if (afterBot === next) { console.error('[match-hub] bot move produced no change'); return; }
+        match.game = afterBot;
+        if (afterBot.winner || afterBot.draw) {
+          match.status = 'ended';
+          if (afterBot.winner && this._scoreStore) {
+            const winnerUsername = afterBot.winner === 'X' ? match.playerX : match.playerO;
+            if (winnerUsername !== BOT_SENTINEL) {
+              this._scoreStore.award(winnerUsername).catch((err) => console.error('[match-hub] score award failed', err));
+            }
+          }
+          this._broadcastState(match);
+          this._broadcast(match.code, { type: 'match.ended', code: match.code, winner: afterBot.winner, draw: afterBot.draw });
+        } else {
+          this._broadcastState(match);
+        }
+      }
     }
   }
 
   _rematch(ws, client) {
     if (client.matchCode === null) return;
     const match = this._matchStore.get(client.matchCode);
+    if (match && match.playerO === BOT_SENTINEL) { this._send(ws, { type: 'error', message: 'Rematch not available in single-player' }); return; }
     if (!match || match.status !== 'ended') { this._send(ws, { type: 'error', message: 'No ended match' }); return; }
 
     const isX = match.playerX === client.username;

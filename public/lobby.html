@@ -20,6 +20,12 @@
     padding: 0.5rem 1rem; font-size: 1rem; cursor: pointer;
     border-radius: 4px; border: 1px solid #888; background: transparent; color: inherit;
   }
+  a.header-link {
+    padding: 0.5rem 1rem; font-size: 1rem;
+    border-radius: 4px; border: 1px solid #888; background: transparent; color: inherit;
+    text-decoration: none;
+  }
+  a.header-link:hover, a.header-link:focus { outline: 2px solid #888; }
   #lobby-section { display: flex; flex-direction: column; gap: 0.75rem; align-items: center; width: 22rem; max-width: 100%; }
   #match-panel { display: none; flex-direction: column; gap: 0.5rem; align-items: center; border: 1px solid #888; border-radius: 6px; padding: 1rem; width: 100%; }
   #match-panel.visible { display: flex; }
@@ -40,6 +46,7 @@
   <header>
     <h1>Tris</h1>
     <span id="user-info"></span>
+    <a id="leaderboard-link" class="header-link" href="/leaderboard.html">Leaderboard</a>
     <button id="logout-btn" type="button">Log out</button>
   </header>
   <main>
@@ -53,6 +60,7 @@
           <button id="copy-btn" type="button">Copy code</button>
         </div>
         <div id="waiting-label" aria-live="polite">Waiting for opponent to join…</div>
+        <button id="vs-computer-btn" type="button">Play vs Computer</button>
       </div>
 
       <div id="join-section">
@@ -72,6 +80,7 @@
       var matchPanel = document.getElementById('match-panel');
       var matchCodeDisplay = document.getElementById('match-code-display');
       var waitingLabel = document.getElementById('waiting-label');
+      var currentMatchCode = '';
 
       fetch('/api/me').then(function (r) {
         if (!r.ok) { window.location.href = '/login.html'; return null; }
@@ -95,9 +104,27 @@
           return r.json().then(function (data) { return { ok: r.ok, data: data }; });
         }).then(function (res) {
           if (res.ok) {
-            window.location.href = '/game.html?code=' + res.data.code + '&role=X';
+            currentMatchCode = res.data.code;
+            matchCodeDisplay.textContent = res.data.code;
+            matchPanel.classList.add('visible');
+            waitingLabel.textContent = 'Waiting for opponent to join…';
           } else {
             statusEl.textContent = res.data.error || 'Failed to create match';
+          }
+        }).catch(function () {
+          statusEl.textContent = 'Network error';
+        });
+      });
+
+      document.getElementById('vs-computer-btn').addEventListener('click', function () {
+        statusEl.textContent = '';
+        fetch('/api/matches/' + currentMatchCode + '/vs-computer', { method: 'POST' }).then(function (r) {
+          return r.json().then(function (data) { return { ok: r.ok, data: data }; });
+        }).then(function (res) {
+          if (res.ok) {
+            window.location.href = '/game.html?code=' + currentMatchCode + '&role=X&mode=computer';
+          } else {
+            statusEl.textContent = res.data.error || 'Failed to start vs computer';
           }
         }).catch(function () {
           statusEl.textContent = 'Network error';
