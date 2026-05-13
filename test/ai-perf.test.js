@@ -172,15 +172,12 @@ try {
 }
 
 function isTrivialFallback(strategy, difficulty) {
-  // If TrivialStrategy is available, check by constructor/class name
-  if (TrivialStrategy) {
-    if (strategy instanceof TrivialStrategy) return true;
-    if (strategy && strategy.constructor && strategy.constructor === TrivialStrategy) return true;
-    // Also check by duck-typing: if strategy's constructor name matches
-    if (strategy && strategy.constructor && strategy.constructor.name === 'TrivialStrategy') return true;
-  }
-  // If the registry returns null/undefined for a named difficulty, that's a skip too
+  // Strategies are plain objects { chooseCell: fn } per ADR-0009.
+  // Detect trivial fallback by reference equality on the chooseCell fn.
   if (!strategy) return true;
+  if (TrivialStrategy && strategy.chooseCell === TrivialStrategy.chooseCell && difficulty !== 'trivial') {
+    return true;
+  }
   return false;
 }
 
@@ -195,18 +192,9 @@ function isTrivialFallback(strategy, difficulty) {
       continue;
     }
 
-    if (!strategy || isTrivialFallback(strategy, difficulty)) {
-      // Check if this difficulty has a REAL strategy registered (not trivial fallback)
-      // The trivial strategy is always present; real ones are added by dev-strategies branch
-      // We detect: if all difficulties return the same trivial strategy, only 'trivial'
-      // difficulty (or the first registered) is real, rest are fallbacks.
-      // Simpler heuristic: if the strategy name is 'trivial' or constructor is TrivialStrategy,
-      // and the difficulty is not named 'trivial', skip.
-      const stratName = strategy && strategy.constructor && strategy.constructor.name;
-      if (stratName === 'TrivialStrategy' || (TrivialStrategy && strategy instanceof TrivialStrategy)) {
-        console.log(`[ai-perf] skipped: ${difficulty} not yet registered (resolves to trivial fallback)`);
-        continue;
-      }
+    if (isTrivialFallback(strategy, difficulty)) {
+      console.log(`[ai-perf] skipped: ${difficulty} not yet registered (resolves to trivial fallback)`);
+      continue;
     }
 
     if (!strategy || typeof strategy.chooseCell !== 'function') {

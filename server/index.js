@@ -22,7 +22,9 @@ const publicGame = path.join(__dirname, '../public/game.js');
 fs.copyFileSync(sharedGame, publicGame);
 
 // ---- stores ----
-const dataDir = path.join(__dirname, '../data');
+// DATA_DIR env var (used by verify.sh for test isolation) overrides default.
+const dataDir = process.env.DATA_DIR || path.join(__dirname, '../data');
+fs.mkdirSync(dataDir, { recursive: true });
 const userStore = new JsonlUserStore(path.join(dataDir, 'users.jsonl'));
 userStore.boot();
 const scoreStore = new JsonlScoreStore(path.join(dataDir, 'scores.jsonl'));
