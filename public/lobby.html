@@ -60,6 +60,7 @@
           <button id="copy-btn" type="button">Copy code</button>
         </div>
         <div id="waiting-label" aria-live="polite">Waiting for opponent to join…</div>
+        <button id="vs-computer-btn" type="button">Play vs Computer</button>
       </div>
 
       <div id="join-section">
@@ -79,6 +80,7 @@
       var matchPanel = document.getElementById('match-panel');
       var matchCodeDisplay = document.getElementById('match-code-display');
       var waitingLabel = document.getElementById('waiting-label');
+      var currentMatchCode = '';
 
       fetch('/api/me').then(function (r) {
         if (!r.ok) { window.location.href = '/login.html'; return null; }
@@ -102,9 +104,27 @@
           return r.json().then(function (data) { return { ok: r.ok, data: data }; });
         }).then(function (res) {
           if (res.ok) {
-            window.location.href = '/game.html?code=' + res.data.code + '&role=X';
+            currentMatchCode = res.data.code;
+            matchCodeDisplay.textContent = res.data.code;
+            matchPanel.classList.add('visible');
+            waitingLabel.textContent = 'Waiting for opponent to join…';
           } else {
             statusEl.textContent = res.data.error || 'Failed to create match';
+          }
+        }).catch(function () {
+          statusEl.textContent = 'Network error';
+        });
+      });
+
+      document.getElementById('vs-computer-btn').addEventListener('click', function () {
+        statusEl.textContent = '';
+        fetch('/api/matches/' + currentMatchCode + '/vs-computer', { method: 'POST' }).then(function (r) {
+          return r.json().then(function (data) { return { ok: r.ok, data: data }; });
+        }).then(function (res) {
+          if (res.ok) {
+            window.location.href = '/game.html?code=' + currentMatchCode + '&role=X&mode=computer';
+          } else {
+            statusEl.textContent = res.data.error || 'Failed to start vs computer';
           }
         }).catch(function () {
           statusEl.textContent = 'Network error';
