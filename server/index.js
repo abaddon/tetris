@@ -7,6 +7,7 @@ const { WebSocketServer } = require('ws');
 
 const BOT_SENTINEL = '__bot__';
 
+const { DIFFICULTIES } = require('../shared/ai');
 const { Router } = require('./router.js');
 const { readBody, send, parseCookies, setCookieHeader } = require('./http-helpers.js');
 const { ScryptHasher, MemorySessionStore } = require('./auth.js');
@@ -141,15 +142,33 @@ router.on('POST', '/api/matches/:code/join', (req, res, params) => {
   }
 });
 
-router.on('POST', '/api/matches/:code/vs-computer', (req, res, params) => {
+router.on('POST', '/api/matches/:code/vs-computer', async (req, res, params) => {
   const username = getSession(req);
   if (!username) { send(res, 401, { error: 'Not authenticated' }); return; }
   const match = matchStore.get(params.code);
   if (!match) { send(res, 404, { error: 'Match not found' }); return; }
   if (match.playerX !== username) { send(res, 403, { error: 'Forbidden' }); return; }
   if (match.status !== 'waiting') { send(res, 409, { error: 'Match already started' }); return; }
-  matchStore.addOpponent(params.code, BOT_SENTINEL);
-  send(res, 200, { code: match.code, role: 'X', mode: 'computer' });
+
+  // Parse body; non-JSON or missing body defaults to {}
+  let body = {};
+  try {
+    const ct = req.headers['content-type'] || '';
+    if (ct.includes('application/json')) {
+      body = await readBody(req);
+    }
+  } catch { /* ignore parse errors; body stays {} */ }
+
+  // Validate difficulty — AC-1/AC-2
+  const rawDiff = typeof body.difficulty === 'string' ? body.difficulty.toLowerCase() : null;
+  if (rawDiff !== null && !DIFFICULTIES.includes(rawDiff)) {
+    send(res, 400, { error: 'Invalid difficulty' });
+    return;
+  }
+  const difficulty = rawDiff !== null ? rawDiff : 'medium';
+
+  matchStore.addOpponent(params.code, BOT_SENTINEL, difficulty);
+  send(res, 200, { code: match.code, role: 'X', mode: 'computer', difficulty });
 });
 
 // ---- HTTP + WS server ----

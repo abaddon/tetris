@@ -678,6 +678,66 @@ async function run() {
     assert(noBotEntry, 'sprint05-s05: no __bot__ entry in GET /api/leaderboard response');
   }
 
+  // ---- Sprint-06 Story 04: POST /api/matches/:code/vs-computer difficulty field ----
+
+  const alice06 = `alice06_${Date.now()}`;
+  let a06Cookie = '';
+  {
+    await req('POST', '/api/register', { username: alice06, password: p });
+    const r = await req('POST', '/api/login', { username: alice06, password: p });
+    assert(r.status === 200, `sprint06-s04: alice06 login 200 (got ${r.status})`);
+    a06Cookie = (r.headers['set-cookie']?.[0] || '').split(';')[0];
+  }
+
+  // AC-1/AC-3/AC-4: valid difficulty stored and echoed in response
+  {
+    const rM = await req('POST', '/api/matches', null, { Cookie: a06Cookie });
+    const c = rM.data.code;
+    const r = await req('POST', `/api/matches/${c}/vs-computer`, { difficulty: 'hard' }, { Cookie: a06Cookie });
+    assert(r.status === 200, `sprint06-s04: vs-computer with difficulty=hard 200 (got ${r.status})`);
+    assert(r.data.difficulty === 'hard', `sprint06-s04: response difficulty is 'hard' (got ${r.data.difficulty})`);
+    assert(r.data.mode === 'computer', `sprint06-s04: response mode is 'computer'`);
+  }
+
+  // AC-1: missing difficulty body defaults to 'medium'
+  {
+    const rM = await req('POST', '/api/matches', null, { Cookie: a06Cookie });
+    const c = rM.data.code;
+    const r = await req('POST', `/api/matches/${c}/vs-computer`, null, { Cookie: a06Cookie });
+    assert(r.status === 200, `sprint06-s04: vs-computer no body 200 (got ${r.status})`);
+    assert(r.data.difficulty === 'medium', `sprint06-s04: missing difficulty defaults to 'medium' (got ${r.data.difficulty})`);
+  }
+
+  // AC-2: invalid difficulty returns 400
+  {
+    const rM = await req('POST', '/api/matches', null, { Cookie: a06Cookie });
+    const c = rM.data.code;
+    const r = await req('POST', `/api/matches/${c}/vs-computer`, { difficulty: 'godlike' }, { Cookie: a06Cookie });
+    assert(r.status === 400, `sprint06-s04: invalid difficulty 400 (got ${r.status})`);
+    assert(r.data.error === 'Invalid difficulty', `sprint06-s04: invalid difficulty error message (got ${r.data.error})`);
+    // match stays waiting after rejected invalid difficulty
+    const rM2 = await req('POST', `/api/matches/${c}/vs-computer`, { difficulty: 'easy' }, { Cookie: a06Cookie });
+    assert(rM2.status === 200, `sprint06-s04: match still joinable after rejected 400 (got ${rM2.status})`);
+  }
+
+  // AC-1: trivial is a valid difficulty
+  {
+    const rM = await req('POST', '/api/matches', null, { Cookie: a06Cookie });
+    const c = rM.data.code;
+    const r = await req('POST', `/api/matches/${c}/vs-computer`, { difficulty: 'trivial' }, { Cookie: a06Cookie });
+    assert(r.status === 200, `sprint06-s04: difficulty=trivial is valid (got ${r.status})`);
+    assert(r.data.difficulty === 'trivial', `sprint06-s04: trivial echoed (got ${r.data.difficulty})`);
+  }
+
+  // AC-1: showcase is a valid difficulty
+  {
+    const rM = await req('POST', '/api/matches', null, { Cookie: a06Cookie });
+    const c = rM.data.code;
+    const r = await req('POST', `/api/matches/${c}/vs-computer`, { difficulty: 'showcase' }, { Cookie: a06Cookie });
+    assert(r.status === 200, `sprint06-s04: difficulty=showcase is valid (got ${r.status})`);
+    assert(r.data.difficulty === 'showcase', `sprint06-s04: showcase echoed (got ${r.data.difficulty})`);
+  }
+
   // ---- results ----
   console.log(`\nIntegration: ${pass} passed, ${fail} failed`);
   if (fail > 0) {
