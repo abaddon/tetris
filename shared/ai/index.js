@@ -2,9 +2,18 @@
 
 // Public surface for shared/ai.
 // Only import this module from server/ and test files.
-// Wave-3b stories that add new strategies call registry.register() on the
-// defaultRegistry exported here.
 
 const { DIFFICULTIES, createRegistry, defaultRegistry } = require('./strategy.js');
+const trivial     = require('./strategies/trivial.js');
+const random      = require('./strategies/random.js');
+const heuristic   = require('./strategies/heuristic.js');
+const minimax     = require('./strategies/minimax.js');
+const minimaxAb   = require('./strategies/minimax-ab.js');
+const mcts        = require('./strategies/mcts.js');
 
-module.exports = { DIFFICULTIES, createRegistry, defaultRegistry };
+module.exports = {
+  DIFFICULTIES,
+  createRegistry,
+  defaultRegistry,
+  strategies: { trivial, random, heuristic, minimax, minimaxAb, mcts },
+};

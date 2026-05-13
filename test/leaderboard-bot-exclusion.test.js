@@ -13,6 +13,12 @@
 const { InMemoryMatchStore } = require('../server/match-store.js');
 const { InMemoryScoreStore } = require('../server/score-store.js');
 const { MatchHub } = require('../server/match-hub.js');
+const trivialStrategy = require('../shared/ai/strategies/trivial.js');
+
+// Pin the bot to the trivial strategy so the board trace is predictable
+// regardless of which difficulty value is stored on the match. The point of
+// THIS test is the sentinel exclusion path, not per-strategy gameplay.
+const pinnedTrivialResolver = () => trivialStrategy;
 
 // ---- load DIFFICULTIES (graceful skip if shared/ai not merged) ----
 
@@ -91,10 +97,10 @@ const BOT_SENTINEL = '__bot__';
 function setupAndDriveBotMatch(difficulty) {
   const scoreStore = new InMemoryScoreStore();
   const matchStore = new InMemoryMatchStore();
-  const hub = new MatchHub(matchStore, null, scoreStore);
+  const hub = new MatchHub(matchStore, null, scoreStore, pinnedTrivialResolver);
 
   const match = matchStore.create('alice');
-  matchStore.addOpponent(match.code, BOT_SENTINEL);
+  matchStore.addOpponent(match.code, BOT_SENTINEL, difficulty);
 
   const wsAlice = makeMockWs();
   hub.handleConnection(wsAlice, 'alice');

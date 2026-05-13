@@ -80,4 +80,4 @@ defaultRegistry.register('hard',     require('./strategies/minimax.js'));
 defaultRegistry.register('expert',   require('./strategies/minimax-ab.js'));
 defaultRegistry.register('showcase', require('./strategies/mcts.js'));
 
-module.exports = { BotStrategy: undefined, DIFFICULTIES, createRegistry, defaultRegistry };
+module.exports = { DIFFICULTIES, createRegistry, defaultRegistry };

@@ -117,16 +117,6 @@ const { fromString } = require('../shared/game.js');
 //   O has [1,3,5]: [3,4,5] O,X,O no; [1,4,7] O,X,null no. No winner. Good.
 //   Empty cells: 7, 8. O's turn.
 
-function nearTerminalOTurn() {
-  return fromString('XOXOXOX..', 'O');
-  // board: X@0,2,4,6  O@1,3,5  empty: 7,8  turn=O
-  // Verify no winner: [0,1,2]: X,O,X no; [3,4,5]: O,X,O no; [6,7,8]: X,.,. no
-  //                   [0,3,6]: X,O,X no; [1,4,7]: O,X,. no; [2,5,8]: X,O,. no
-  //                   [0,4,8]: X,X,. no; [2,4,6]: X,X,X -> WAIT that's a win for X!
-  // 2,4,6: X,X,X -> X wins! That's terminal. Bad.
-}
-
-// Let's build near-terminal carefully by simulation instead
 function buildNearTerminal() {
   // 7 moves played, O's turn, no winner
   // Tried: X@0,1,6,7 O@2,3,4 (5 moves O's turn=false; that's 4X+3O=7 moves, O's turn)
