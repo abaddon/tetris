@@ -559,6 +559,73 @@ async function run() {
     assert(entry && entry.pts >= 1, `sprint04-s04: winner has pts >= 1 (got ${entry ? entry.pts : 'none'})`);
   }
 
+  // ---- Sprint-05 Story 02: POST /api/matches/:code/vs-computer ----
+
+  const alice02 = `alice02_${Date.now()}`;
+  let a02Cookie = '';
+  {
+    await req('POST', '/api/register', { username: alice02, password: p });
+    const r = await req('POST', '/api/login', { username: alice02, password: p });
+    assert(r.status === 200, `sprint05-s02: alice02 login 200 (got ${r.status})`);
+    a02Cookie = (r.headers['set-cookie']?.[0] || '').split(';')[0];
+  }
+
+  // alice creates a match
+  let vsCode = '';
+  {
+    const r = await req('POST', '/api/matches', null, { Cookie: a02Cookie });
+    assert(r.status === 201, `sprint05-s02: alice02 creates match 201 (got ${r.status})`);
+    vsCode = r.data.code;
+  }
+
+  // happy path: owner calls vs-computer -> 200 with mode:'computer'
+  {
+    const r = await req('POST', `/api/matches/${vsCode}/vs-computer`, null, { Cookie: a02Cookie });
+    assert(r.status === 200, `sprint05-s02: vs-computer 200 (got ${r.status})`);
+    assert(r.data.code === vsCode, `sprint05-s02: response echoes code`);
+    assert(r.data.role === 'X', `sprint05-s02: role is X`);
+    assert(r.data.mode === 'computer', `sprint05-s02: mode is computer`);
+  }
+
+  // second call -> 409 Match already started
+  {
+    const r = await req('POST', `/api/matches/${vsCode}/vs-computer`, null, { Cookie: a02Cookie });
+    assert(r.status === 409, `sprint05-s02: second vs-computer 409 (got ${r.status})`);
+    assert(r.data.error === 'Match already started', `sprint05-s02: 409 error message`);
+  }
+
+  // non-owner gets 403
+  {
+    const bob02 = `bob02_${Date.now()}`;
+    await req('POST', '/api/register', { username: bob02, password: p });
+    const rB = await req('POST', '/api/login', { username: bob02, password: p });
+    const b02Cookie = (rB.headers['set-cookie']?.[0] || '').split(';')[0];
+    // alice creates a fresh waiting match
+    const rM = await req('POST', '/api/matches', null, { Cookie: a02Cookie });
+    const freshCode = rM.data.code;
+    const r = await req('POST', `/api/matches/${freshCode}/vs-computer`, null, { Cookie: b02Cookie });
+    assert(r.status === 403, `sprint05-s02: non-owner 403 (got ${r.status})`);
+  }
+
+  // unauthenticated -> 401
+  {
+    const r = await req('POST', `/api/matches/${vsCode}/vs-computer`, null);
+    assert(r.status === 401, `sprint05-s02: unauthenticated 401 (got ${r.status})`);
+  }
+
+  // missing match code -> 404
+  {
+    const r = await req('POST', '/api/matches/ZZZZZ/vs-computer', null, { Cookie: a02Cookie });
+    assert(r.status === 404, `sprint05-s02: unknown code 404 (got ${r.status})`);
+  }
+
+  // reserved username __bot__ is rejected at register
+  {
+    const r = await req('POST', '/api/register', { username: '__bot__', password: p });
+    assert(r.status === 400, `sprint05-s02: __bot__ registration rejected 400 (got ${r.status})`);
+    assert(r.data.error === 'Reserved name', `sprint05-s02: reserved name error message`);
+  }
+
   // ---- results ----
   console.log(`\nIntegration: ${pass} passed, ${fail} failed`);
   if (fail > 0) {

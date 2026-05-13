@@ -5,6 +5,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { WebSocketServer } = require('ws');
 
+const BOT_SENTINEL = '__bot__';
+
 const { Router } = require('./router.js');
 const { readBody, send, parseCookies, setCookieHeader } = require('./http-helpers.js');
 const { ScryptHasher, MemorySessionStore } = require('./auth.js');
@@ -138,6 +140,17 @@ router.on('POST', '/api/matches/:code/join', (req, res, params) => {
   }
 });
 
+router.on('POST', '/api/matches/:code/vs-computer', (req, res, params) => {
+  const username = getSession(req);
+  if (!username) { send(res, 401, { error: 'Not authenticated' }); return; }
+  const match = matchStore.get(params.code);
+  if (!match) { send(res, 404, { error: 'Match not found' }); return; }
+  if (match.playerX !== username) { send(res, 403, { error: 'Forbidden' }); return; }
+  if (match.status !== 'waiting') { send(res, 409, { error: 'Match already started' }); return; }
+  matchStore.addOpponent(params.code, BOT_SENTINEL);
+  send(res, 200, { code: match.code, role: 'X', mode: 'computer' });
+});
+
 // ---- HTTP + WS server ----
 const wss = new WebSocketServer({ noServer: true });
 
@@ -167,4 +180,4 @@ server.listen(PORT, () => {
   console.log(`listening on :${addr.port}`);
 });
 
-module.exports = { server, userStore, sessionStore, matchStore, matchHub, scoreStore };
+module.exports = { server, userStore, sessionStore, matchStore, matchHub, scoreStore, BOT_SENTINEL };
