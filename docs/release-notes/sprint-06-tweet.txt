@@ -1,0 +1,3 @@
+Tris sprint-06: Expert mode is unbeatable. Alpha-beta minimax over the full tic-tac-toe tree (~5,478 states) in 5 ms worst-case; NFR was 50 ms. Plus random, heuristic, depth-limited minimax, and MCTS on the same solved game. Pick a difficulty, compare how they play.
+
+Commit SHAs: 5483a86 (strategies), 02027a3 (UI), 34acf33 (API), 7978f25 (QA fixes)
