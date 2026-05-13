@@ -5,6 +5,9 @@ set -euo pipefail
 # 1. Pure-logic tests (no server needed)
 node test.js
 
+# 1b. AI perf regression (no server needed; skips gracefully if shared/ai not yet merged)
+node test/ai-perf.test.js
+
 # 2. Install dependencies (idempotent)
 npm install --no-audit --no-fund --silent
 
