@@ -33,13 +33,14 @@ class InMemoryMatchStore {
     return this._map.get(code.toUpperCase()) || null;
   }
 
-  addOpponent(code, username) {
+  addOpponent(code, username, difficulty) {
     const match = this.get(code);
     if (!match) throw { code: 'NOT_FOUND' };
     if (match.playerO !== null) throw { code: 'FULL' };
     if (match.playerX === username) throw { code: 'SELF_JOIN' };
     match.playerO = username;
     match.status = 'active';
+    if (difficulty !== undefined) match.difficulty = difficulty;
     return match;
   }
 

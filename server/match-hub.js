@@ -1,16 +1,20 @@
 'use strict';
 
-const { play, firstEmptyCell } = require('../shared/game.js');
+const { play } = require('../shared/game.js');
+const { defaultRegistry } = require('../shared/ai');
 
 const PING_INTERVAL_MS = 30_000;
 const BOT_SENTINEL = '__bot__';
 const PONG_TIMEOUT_MS = 60_000;
 
 class MatchHub {
-  constructor(matchStore, sessionStore, scoreStore) {
+  constructor(matchStore, sessionStore, scoreStore, strategyResolver) {
     this._matchStore = matchStore;
     this._sessionStore = sessionStore;
     this._scoreStore = scoreStore || null;
+    // strategyResolver: (difficulty: string) -> BotStrategy
+    // Defaults to the default registry's get method (falls back to trivial on unknown).
+    this._strategyResolver = strategyResolver || defaultRegistry.get.bind(defaultRegistry);
     // matchCode -> Set<ws> (both players)
     this._rooms = new Map();
     // ws -> { username, matchCode, lastPong }
@@ -103,8 +107,11 @@ class MatchHub {
       this._broadcastState(match);
 
       if (match.status === 'active' && !next.winner && !next.draw && match.playerO === BOT_SENTINEL && next.turn === 'O') {
-        const botCell = firstEmptyCell(next.board);
-        if (botCell === -1) { console.error('[match-hub] bot has no legal move'); return; }
+        const strategy = this._strategyResolver(match.difficulty || 'trivial');
+        let botCell;
+        try { botCell = strategy.chooseCell(next, 'O'); }
+        catch (err) { console.error('[match-hub] strategy threw', err); return; }
+        if (botCell === -1 || next.board[botCell] !== null) { console.error('[match-hub] bot has no legal move'); return; }
         const afterBot = play(next, botCell);
         if (afterBot === next) { console.error('[match-hub] bot move produced no change'); return; }
         match.game = afterBot;

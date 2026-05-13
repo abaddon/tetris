@@ -508,6 +508,9 @@ const _botTurnReady = (() => {
   }
 })().catch((err) => { console.error(err); process.exit(1); });
 
+// ---- AI strategy tests (sprint-06 story 02) ----
+require('./test/ai-strategies.test.js');
+
 // ---- MatchHub win-scoring tests (AC-1 through AC-9, sprint-04 story 04) ----
 // Uses InMemoryScoreStore (no disk) and InMemoryMatchStore with mock WS objects.
 // Wrapped in an async IIFE so we can await the rejected-award microtask test (AC-5).

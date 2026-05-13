@@ -5,20 +5,30 @@ set -euo pipefail
 # 1. Pure-logic tests (no server needed)
 node test.js
 
+# 1b. AI perf regression (no server needed; skips gracefully if shared/ai not yet merged)
+node test/ai-perf.test.js
+
+# 1c. Leaderboard bot-exclusion regression across all difficulties (no server needed)
+node test/leaderboard-bot-exclusion.test.js
+
 # 2. Install dependencies (idempotent)
 npm install --no-audit --no-fund --silent
 
-# 3. Start server on an ephemeral port; capture actual port from stdout
+# 3. Start server on an ephemeral port; capture actual port from stdout.
+#    Use an isolated DATA_DIR so the leaderboard top-10 isn't polluted
+#    by prior verify runs (each integration test creates fresh winnerX_<ts> users).
 SERVER_PID=""
 TMPLOG=$(mktemp)
+TMPDATA=$(mktemp -d)
 
 cleanup() {
   [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true
   rm -f "$TMPLOG"
+  rm -rf "$TMPDATA"
 }
 trap cleanup EXIT
 
-PORT=0 node server/index.js >"$TMPLOG" 2>&1 &
+PORT=0 DATA_DIR="$TMPDATA" node server/index.js >"$TMPLOG" 2>&1 &
 SERVER_PID=$!
 
 ACTUAL_PORT=""
